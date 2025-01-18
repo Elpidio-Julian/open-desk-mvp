@@ -23,5 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 
-
+# Env stuff
+.cursorignore
 .env
+
+# dev plans
+/plans/*
