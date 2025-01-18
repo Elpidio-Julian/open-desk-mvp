@@ -2,7 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { RoleProvider } from './contexts/RoleContext.jsx';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
-import { auth } from './services/supabase';
+import { supabase } from './services/supabase';
 import { useEffect, useState } from 'react';
 
 function App() {
@@ -10,25 +10,20 @@ function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    checkUser();
-    const { data: { subscription } } = auth.supabase.auth.onAuthStateChange((_event, session) => {
+    // Check current session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       setLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, []);
-
-  async function checkUser() {
-    try {
-      const { user } = await auth.getCurrentUser();
-      setUser(user);
-    } catch (error) {
-      console.error('Error checking user:', error);
-    } finally {
-      setLoading(false);
-    }
-  }
 
   if (loading) {
     return <div>Loading...</div>;

@@ -3,27 +3,23 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Create a single instance of the Supabase client
+let supabaseInstance = null;
 
-export const auth = {
-  signIn: async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+function getSupabaseClient() {
+  if (!supabaseInstance) {
+    supabaseInstance = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true
+      }
     });
-    return { data, error };
-  },
+  }
+  return supabaseInstance;
+}
 
-  signOut: async () => {
-    const { error } = await supabase.auth.signOut();
-    return { error };
-  },
-
-  getCurrentUser: async () => {
-    const { data: { user }, error } = await supabase.auth.getUser();
-    return { user, error };
-  },
-};
+export const supabase = getSupabaseClient();
 
 export const tickets = {
   create: async (ticketData) => {
