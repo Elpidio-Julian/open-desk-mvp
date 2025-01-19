@@ -1,45 +1,50 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { RoleProvider } from './contexts/RoleContext.jsx';
-import Dashboard from './pages/Dashboard';
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
-import { supabase } from './services/supabase';
-import { useEffect, useState } from 'react';
+import Dashboard from './pages/Dashboard';
+import { AuthProvider } from './contexts/AuthContext';
+import { RoleProvider } from './contexts/RoleContext';
+import { useAuth } from './contexts/AuthContext';
 
-function App() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+// Protected route wrapper
+const ProtectedRoute = ({ children }) => {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" />;
+  return children;
+};
 
-  useEffect(() => {
-    // Check current session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  if (loading) {
-    return <div>Loading...</div>;
-  }
-
+const AppRoutes = () => {
   return (
-    <Router>
-      <RoleProvider>
-        <Routes>
-          <Route path="/login" element={!user ? <Login /> : <Navigate to="/dashboard" />} />
-          <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/login" />} />
-          <Route path="/" element={<Navigate to="/dashboard" />} />
-        </Routes>
-      </RoleProvider>
-    </Router>
+    <Routes>
+      {/* Public routes */}
+      <Route path="/login" element={<Login />} />
+
+      {/* Protected routes */}
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Redirect root to dashboard */}
+      <Route path="/" element={<Navigate to="/dashboard" />} />
+    </Routes>
   );
-}
+};
+
+const App = () => {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <RoleProvider>
+          <AppRoutes />
+        </RoleProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  );
+};
 
 export default App;

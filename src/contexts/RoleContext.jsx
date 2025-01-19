@@ -1,55 +1,42 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
+import { useAuth } from './AuthContext';
 
-const RoleContext = createContext();
+const RoleContext = createContext({});
 
 export const RoleProvider = ({ children }) => {
   const [userRole, setUserRole] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  const fetchUserRole = async (userId) => {
-    if (!userId) {
-      setUserRole(null);
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', userId)
-        .single();
-
-      if (error) throw error;
-      
-      setUserRole(data?.role || null);
-    } catch (error) {
-      console.error('Error fetching user role:', error);
-      setUserRole(null);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { user } = useAuth();
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      fetchUserRole(session?.user?.id);
-    });
+    const fetchUserRole = async () => {
+      if (!user) {
+        setUserRole(null);
+        return;
+      }
 
-    return () => subscription.unsubscribe();
-  }, []);
+      try {
+        const { data, error } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+
+        if (error) throw error;
+        setUserRole(data?.role || 'customer'); // Default to customer if no role is set
+      } catch (error) {
+        console.error('Error fetching user role:', error.message);
+        setUserRole('customer'); // Default to customer on error
+      }
+    };
+
+    fetchUserRole();
+  }, [user]);
 
   const value = {
     userRole,
-    setUserRole,
-    loading,
-    fetchUserRole
+    setUserRole, // Expose setUserRole for admin functionality
   };
-
-  if (loading) {
-    return <div>Loading role...</div>;
-  }
 
   return (
     <RoleContext.Provider value={value}>
