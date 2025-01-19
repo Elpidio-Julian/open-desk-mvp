@@ -20,12 +20,12 @@ const Header = () => {
 
   const {isMobile} = useSidebar();
   return (
-    <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear">
       <div className="flex items-center gap-2 px-4">
         {isMobile ? <SidebarTrigger /> : null}
       </div>
       
-      <div className="ml-auto flex items-center gap-4">
+      <div className="ml-auto flex items-center gap-2 px-4">
         {/* Search */}
         <div className="flex items-center">
           {showSearch ? (
@@ -42,6 +42,7 @@ const Header = () => {
             <Button
               variant="ghost"
               size="icon"
+              className="h-8 w-8 btn-icon"
               onClick={() => setShowSearch(true)}
             >
               <Search className="h-4 w-4" />
@@ -64,16 +65,11 @@ const Header = () => {
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>My Account</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-muted-foreground"
-            >
+            <DropdownMenuItem className="text-muted-foreground">
               {user?.email}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-red-600"
-              onClick={signOut}
-            >
+            <DropdownMenuItem className="text-red-600" onClick={signOut}>
               Sign out
             </DropdownMenuItem>
           </DropdownMenuContent>
