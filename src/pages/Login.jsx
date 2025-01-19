@@ -73,7 +73,7 @@ const Login = () => {
   return (
     <div className="login-page">
       <div className="auth-container">
-        <h1>Welcome to Zendesk Clone</h1>
+        <h1>Welcome to Better Ticket Master</h1>
         
         <form onSubmit={handleSubmit} className="auth-form">
           {isSignUp && (
