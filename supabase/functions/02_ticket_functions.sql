@@ -75,4 +75,102 @@ BEGIN
             AND role IN ('admin', 'agent')
         );
 END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to record ticket history
+CREATE OR REPLACE FUNCTION record_ticket_history()
+RETURNS TRIGGER AS $$
+DECLARE
+    old_value TEXT;
+    new_value TEXT;
+BEGIN
+    -- Track status changes
+    IF (TG_OP = 'UPDATE' AND OLD.status IS DISTINCT FROM NEW.status) THEN
+        INSERT INTO ticket_history (ticket_id, user_id, field_name, old_value, new_value)
+        VALUES (NEW.id, auth.uid(), 'status', OLD.status::TEXT, NEW.status::TEXT);
+    END IF;
+
+    -- Track priority changes
+    IF (TG_OP = 'UPDATE' AND OLD.priority IS DISTINCT FROM NEW.priority) THEN
+        INSERT INTO ticket_history (ticket_id, user_id, field_name, old_value, new_value)
+        VALUES (NEW.id, auth.uid(), 'priority', OLD.priority::TEXT, NEW.priority::TEXT);
+    END IF;
+
+    -- Track assignment changes
+    IF (TG_OP = 'UPDATE' AND OLD.assigned_to IS DISTINCT FROM NEW.assigned_to) THEN
+        INSERT INTO ticket_history (ticket_id, user_id, field_name, old_value, new_value)
+        VALUES (
+            NEW.id, 
+            auth.uid(), 
+            'assigned_to',
+            COALESCE((SELECT email FROM users WHERE id = OLD.assigned_to), 'unassigned'),
+            COALESCE((SELECT email FROM users WHERE id = NEW.assigned_to), 'unassigned')
+        );
+    END IF;
+
+    -- Track title changes
+    IF (TG_OP = 'UPDATE' AND OLD.title IS DISTINCT FROM NEW.title) THEN
+        INSERT INTO ticket_history (ticket_id, user_id, field_name, old_value, new_value)
+        VALUES (NEW.id, auth.uid(), 'title', OLD.title, NEW.title);
+    END IF;
+
+    -- Track description changes
+    IF (TG_OP = 'UPDATE' AND OLD.description IS DISTINCT FROM NEW.description) THEN
+        INSERT INTO ticket_history (ticket_id, user_id, field_name, old_value, new_value)
+        VALUES (NEW.id, auth.uid(), 'description', OLD.description, NEW.description);
+    END IF;
+
+    -- Track custom fields changes
+    IF (TG_OP = 'UPDATE' AND OLD.custom_fields IS DISTINCT FROM NEW.custom_fields) THEN
+        INSERT INTO ticket_history (ticket_id, user_id, field_name, old_value, new_value)
+        VALUES (NEW.id, auth.uid(), 'custom_fields', OLD.custom_fields::TEXT, NEW.custom_fields::TEXT);
+    END IF;
+
+    -- Track ticket creation
+    IF (TG_OP = 'INSERT') THEN
+        INSERT INTO ticket_history (ticket_id, user_id, field_name, old_value, new_value)
+        VALUES (NEW.id, auth.uid(), 'ticket_created', NULL, 'Ticket created');
+    END IF;
+
+    -- Track ticket resolution
+    IF (TG_OP = 'UPDATE' AND OLD.resolved_at IS NULL AND NEW.resolved_at IS NOT NULL) THEN
+        INSERT INTO ticket_history (ticket_id, user_id, field_name, old_value, new_value)
+        VALUES (NEW.id, auth.uid(), 'resolution', 'open', 'resolved');
+    END IF;
+
+    -- Track ticket closure
+    IF (TG_OP = 'UPDATE' AND OLD.closed_at IS NULL AND NEW.closed_at IS NOT NULL) THEN
+        INSERT INTO ticket_history (ticket_id, user_id, field_name, old_value, new_value)
+        VALUES (NEW.id, auth.uid(), 'closure', 'not_closed', 'closed');
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to record tag changes
+CREATE OR REPLACE FUNCTION record_ticket_tag_history()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (TG_OP = 'INSERT') THEN
+        INSERT INTO ticket_history (ticket_id, user_id, field_name, old_value, new_value)
+        VALUES (
+            NEW.ticket_id,
+            auth.uid(),
+            'tag_added',
+            NULL,
+            (SELECT name FROM tags WHERE id = NEW.tag_id)
+        );
+    ELSIF (TG_OP = 'DELETE') THEN
+        INSERT INTO ticket_history (ticket_id, user_id, field_name, old_value, new_value)
+        VALUES (
+            OLD.ticket_id,
+            auth.uid(),
+            'tag_removed',
+            (SELECT name FROM tags WHERE id = OLD.tag_id),
+            NULL
+        );
+    END IF;
+    RETURN COALESCE(NEW, OLD);
+END;
 $$ LANGUAGE plpgsql SECURITY DEFINER; 

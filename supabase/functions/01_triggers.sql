@@ -47,4 +47,15 @@ CREATE OR REPLACE TRIGGER update_tickets_updated_at
 CREATE OR REPLACE TRIGGER update_comments_updated_at
     BEFORE UPDATE ON comments
     FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column(); 
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Create triggers for ticket history tracking
+CREATE OR REPLACE TRIGGER on_ticket_change
+    AFTER INSERT OR UPDATE ON tickets
+    FOR EACH ROW
+    EXECUTE FUNCTION record_ticket_history();
+
+CREATE OR REPLACE TRIGGER on_ticket_tag_change
+    AFTER INSERT OR DELETE ON ticket_tags
+    FOR EACH ROW
+    EXECUTE FUNCTION record_ticket_tag_history(); 

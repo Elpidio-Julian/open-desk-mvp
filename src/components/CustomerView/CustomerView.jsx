@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../services/supabase';
+import { useAuth } from '../../contexts/AuthContext';
 import Button from '../SharedComponents/Button/Button';
 import Table from '../SharedComponents/Table/Table';
 import Modal from '../SharedComponents/Modal/Modal';
@@ -7,6 +8,7 @@ import Input from '../SharedComponents/Form/Input';
 import Alert from '../SharedComponents/Notification/Alert';
 
 const CustomerView = () => {
+  const { user } = useAuth();
   const [tickets, setTickets] = useState([]);
   const [isNewTicketModalOpen, setIsNewTicketModalOpen] = useState(false);
   const [newTicket, setNewTicket] = useState({ title: '', description: '' });
@@ -21,6 +23,7 @@ const CustomerView = () => {
       const { data, error } = await supabase
         .from('tickets')
         .select('*')
+        .eq('created_by', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -35,11 +38,14 @@ const CustomerView = () => {
 
   const handleCreateTicket = async () => {
     try {
+      if (!user) throw new Error('You must be logged in to create a ticket');
+      
       const { data, error } = await supabase.from('tickets').insert([
         {
           title: newTicket.title,
           description: newTicket.description,
           status: 'open',
+          created_by: user.id,
         },
       ]);
 
