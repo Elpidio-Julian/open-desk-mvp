@@ -1,10 +1,10 @@
 import React from 'react';
-import SupportQueue from '../components/AgentView/SupportQueue';
-import Header from '../components/SharedComponents/Layout/Header';
-import AppSidebar from '../components/SharedComponents/Layout/AppSidebar';
-import { SidebarProvider } from "@/components/ui/sidebar";
+import SupportQueue from '../../AgentView/SupportQueue';
+import Header from '../Layout/Header';
+import AppSidebar from '../Layout/AppSidebar';
+import { SidebarProvider } from "../../ui/sidebar";
 
-const MyTickets = () => {
+const MyTicketsPage = () => {
   return (
     <SidebarProvider defaultOpen={false}>
       <div className="flex min-h-screen w-full">
@@ -24,4 +24,4 @@ const MyTickets = () => {
   );
 };
 
-export default MyTickets; 
+export default MyTicketsPage; 

@@ -1,12 +1,8 @@
 import React from 'react';
+import AdminDashboard from './AdminDashboard';
 
 const AdminView = () => {
-  return (
-    <div className="admin-view">
-      <h1>Admin Dashboard</h1>
-      {/* Admin specific features will go here */}
-    </div>
-  );
+  return <AdminDashboard />;
 };
 
 export default AdminView; 
