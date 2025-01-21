@@ -1,11 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../services/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import Button from '../SharedComponents/Button/Button';
 import Table from '../SharedComponents/Table/Table';
 import Modal from '../SharedComponents/Modal/Modal';
 import Input from '../SharedComponents/Form/Input';
 import Alert from '../SharedComponents/Notification/Alert';
+
+const MARKDOWN_TIPS = `
+### Markdown Tips:
+- **Bold** text: \`**text**\`
+- *Italic* text: \`*text*\`
+- Lists: Start lines with \`-\` or \`1.\`
+- [Links](url): \`[text](url)\`
+- \`Code\`: \`\`\`code\`\`\`
+- > Quotes: Start lines with \`>\`
+`.trim();
 
 const CustomerView = () => {
   const { user } = useAuth();
@@ -18,6 +30,8 @@ const CustomerView = () => {
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [newTicket, setNewTicket] = useState({ title: '', description: '' });
   const [alert, setAlert] = useState(null);
+  const [showMarkdownTips, setShowMarkdownTips] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     fetchTickets();
@@ -43,32 +57,35 @@ const CustomerView = () => {
 
   const fetchTicketDetails = async (ticketId) => {
     try {
-      // Fetch ticket comments
+      // Fetch ticket details with related data
+      const { data: ticket, error: ticketError } = await supabase
+        .from('tickets')
+        .select(`
+          *,
+          created_by:users!tickets_created_by_fkey(full_name, email),
+          assigned_to:users!tickets_assigned_to_fkey(full_name, email)
+        `)
+        .eq('id', ticketId)
+        .single();
+
+      if (ticketError) throw ticketError;
+      setSelectedTicket(ticket);
+
+      // Fetch comments (excluding internal notes)
       const { data: comments, error: commentsError } = await supabase
         .from('comments')
         .select(`
-          *,
-          user:users(full_name, email)
+          id,
+          content,
+          created_at,
+          user:users!comments_user_id_fkey(full_name, email)
         `)
         .eq('ticket_id', ticketId)
         .eq('is_internal', false)
         .order('created_at', { ascending: true });
 
       if (commentsError) throw commentsError;
-      setTicketComments(comments);
-
-      // Fetch ticket history
-      const { data: history, error: historyError } = await supabase
-        .from('ticket_history')
-        .select(`
-          *,
-          user:users(full_name, email)
-        `)
-        .eq('ticket_id', ticketId)
-        .order('created_at', { ascending: true });
-
-      if (historyError) throw historyError;
-      setSelectedTicket(prev => ({ ...prev, history }));
+      setTicketComments(comments || []);
 
     } catch (error) {
       setAlert({
@@ -196,18 +213,53 @@ const CustomerView = () => {
             }
             required
           />
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2">
-              Description
-            </label>
-            <textarea
-              value={newTicket.description}
-              onChange={(e) =>
-                setNewTicket({ ...newTicket, description: e.target.value })
-              }
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              rows="4"
-            />
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <label className="block text-gray-700 text-sm font-bold">
+                Description
+              </label>
+              <div className="space-x-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowMarkdownTips(!showMarkdownTips)}
+                >
+                  {showMarkdownTips ? 'Hide Formatting Help' : 'Formatting Help'}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowPreview(!showPreview)}
+                >
+                  {showPreview ? 'Edit' : 'Preview'}
+                </Button>
+              </div>
+            </div>
+            
+            {showMarkdownTips && (
+              <div className="p-4 bg-gray-50 rounded-lg text-sm">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {MARKDOWN_TIPS}
+                </ReactMarkdown>
+              </div>
+            )}
+
+            {showPreview ? (
+              <div className="min-h-[200px] p-4 bg-gray-50 rounded-lg prose prose-sm max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {newTicket.description || '*No content yet*'}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <textarea
+                value={newTicket.description}
+                onChange={(e) =>
+                  setNewTicket({ ...newTicket, description: e.target.value })
+                }
+                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline min-h-[200px]"
+                placeholder="Describe your issue... (Markdown supported)"
+              />
+            )}
           </div>
           <div className="flex justify-end space-x-2">
             <Button
@@ -234,6 +286,7 @@ const CustomerView = () => {
           setIsTicketDetailsModalOpen(false);
           setSelectedTicket(null);
           setTicketComments([]);
+          setShowPreview(false);
         }}
         title={selectedTicket?.title || 'Ticket Details'}
       >
@@ -247,7 +300,11 @@ const CustomerView = () => {
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500">Description</h3>
-                <p className="mt-1 whitespace-pre-wrap">{selectedTicket.description}</p>
+                <div className="mt-1 prose prose-sm max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {selectedTicket.description}
+                  </ReactMarkdown>
+                </div>
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500">Created</h3>
@@ -255,6 +312,14 @@ const CustomerView = () => {
                   {new Date(selectedTicket.created_at).toLocaleString()}
                 </p>
               </div>
+              {selectedTicket.assigned_to && (
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500">Assigned To</h3>
+                  <p className="mt-1">
+                    {selectedTicket.assigned_to.full_name || selectedTicket.assigned_to.email}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Comments Section */}
@@ -265,13 +330,17 @@ const CustomerView = () => {
                   <div key={comment.id} className="bg-gray-50 p-4 rounded-lg">
                     <div className="flex justify-between items-start">
                       <span className="text-sm font-medium">
-                        {comment.user.full_name || comment.user.email}
+                        {comment.user?.full_name || comment.user?.email}
                       </span>
                       <span className="text-xs text-gray-500">
                         {new Date(comment.created_at).toLocaleString()}
                       </span>
                     </div>
-                    <p className="mt-1 text-gray-600 whitespace-pre-wrap">{comment.content}</p>
+                    <div className="mt-1 prose prose-sm max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {comment.content}
+                      </ReactMarkdown>
+                    </div>
                   </div>
                 ))}
                 {ticketComments.length === 0 && (
@@ -280,12 +349,48 @@ const CustomerView = () => {
 
                 {/* New Comment Form */}
                 <div className="mt-4 space-y-3">
-                  <textarea
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    placeholder="Add a comment..."
-                    className="w-full min-h-[100px] p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
+                  <div className="flex justify-between items-center">
+                    <h4 className="text-sm font-medium text-gray-900">Add Comment</h4>
+                    <div className="space-x-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setShowMarkdownTips(!showMarkdownTips)}
+                      >
+                        {showMarkdownTips ? 'Hide Formatting Help' : 'Formatting Help'}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setShowPreview(!showPreview)}
+                      >
+                        {showPreview ? 'Edit' : 'Preview'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {showMarkdownTips && (
+                    <div className="p-4 bg-gray-50 rounded-lg text-sm">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {MARKDOWN_TIPS}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+
+                  {showPreview ? (
+                    <div className="min-h-[100px] p-4 bg-gray-50 rounded-lg prose prose-sm max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {newComment || '*No content yet*'}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <textarea
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      placeholder="Write your comment... (Markdown supported)"
+                      className="w-full min-h-[100px] p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  )}
                   <div className="flex justify-end">
                     <Button
                       variant="primary"
@@ -298,34 +403,6 @@ const CustomerView = () => {
                 </div>
               </div>
             </div>
-
-            {/* Ticket History */}
-            {selectedTicket.history && selectedTicket.history.length > 0 && (
-              <div className="space-y-4">
-                <h3 className="font-medium text-gray-900">History</h3>
-                <div className="space-y-2">
-                  {selectedTicket.history.map((event) => (
-                    <div key={event.id} className="text-sm text-gray-600">
-                      <span className="font-medium">{event.user.full_name || event.user.email}</span>
-                      {' '}
-                      {event.field_name === 'ticket_created' ? (
-                        'created this ticket'
-                      ) : (
-                        <>
-                          changed {event.field_name} from{' '}
-                          <span className="font-medium">{event.old_value || 'none'}</span>
-                          {' '}to{' '}
-                          <span className="font-medium">{event.new_value}</span>
-                        </>
-                      )}
-                      <span className="text-gray-400 ml-2">
-                        {new Date(event.created_at).toLocaleString()}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </Modal>
