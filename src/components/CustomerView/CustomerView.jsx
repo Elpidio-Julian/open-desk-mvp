@@ -32,6 +32,8 @@ const CustomerView = () => {
   const [alert, setAlert] = useState(null);
   const [showMarkdownTips, setShowMarkdownTips] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [expandedComments, setExpandedComments] = useState(false);
+  const INITIAL_COMMENTS_TO_SHOW = 3;
 
   useEffect(() => {
     fetchTickets();
@@ -78,7 +80,9 @@ const CustomerView = () => {
           id,
           content,
           created_at,
-          user:users!comments_user_id_fkey(full_name, email)
+          user_id,
+          is_internal,
+          user:users(id, full_name, email)
         `)
         .eq('ticket_id', ticketId)
         .eq('is_internal', false)
@@ -326,25 +330,47 @@ const CustomerView = () => {
             <div className="space-y-4">
               <h3 className="font-medium text-gray-900">Comments</h3>
               <div className="space-y-4">
-                {ticketComments.map((comment) => (
-                  <div key={comment.id} className="bg-gray-50 p-4 rounded-lg">
-                    <div className="flex justify-between items-start">
-                      <span className="text-sm font-medium">
-                        {comment.user?.full_name || comment.user?.email}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {new Date(comment.created_at).toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="mt-1 prose prose-sm max-w-none">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {comment.content}
-                      </ReactMarkdown>
-                    </div>
-                  </div>
-                ))}
-                {ticketComments.length === 0 && (
+                {ticketComments.length === 0 ? (
                   <p className="text-gray-500 text-center">No comments yet</p>
+                ) : (
+                  <>
+                    {(expandedComments ? ticketComments : ticketComments.slice(-INITIAL_COMMENTS_TO_SHOW)).map((comment) => (
+                      <div key={comment.id} className="bg-gray-50 p-4 rounded-lg">
+                        <div className="flex justify-between items-start">
+                          <span className="text-sm font-medium">
+                            {comment.user?.id === user.id ? (
+                              // Customer's comment
+                              comment.user?.full_name || comment.user?.email
+                            ) : (
+                              // Agent's comment
+                              <span className="text-blue-700">
+                                (Support Agent) {comment.user?.full_name || comment.user?.email || 'Support Team'}
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {new Date(comment.created_at).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="mt-1 prose prose-sm max-w-none">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {comment.content}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    ))}
+                    {ticketComments.length > INITIAL_COMMENTS_TO_SHOW && (
+                      <div className="text-center">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setExpandedComments(!expandedComments)}
+                        >
+                          {expandedComments ? 'Show Less' : `Show ${ticketComments.length - INITIAL_COMMENTS_TO_SHOW} More Comments`}
+                        </Button>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {/* New Comment Form */}

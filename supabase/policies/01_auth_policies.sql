@@ -39,4 +39,20 @@ CREATE POLICY "Admins have full access"
 -- Agents can view all users
 CREATE POLICY "Agents can view all users"
     ON users FOR SELECT
-    USING (check_user_role(auth.uid(), ARRAY['admin', 'agent'])); 
+    USING (check_user_role(auth.uid(), ARRAY['admin', 'agent']));
+
+-- Allow viewing user data when querying comments
+CREATE POLICY "Allow viewing user data in comments"
+    ON users FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1 FROM comments c
+            LEFT JOIN tickets t ON c.ticket_id = t.id
+            WHERE users.id = c.user_id
+            AND (
+                t.created_by = auth.uid()
+                OR t.assigned_to = auth.uid()
+                OR check_user_role(auth.uid(), ARRAY['admin', 'agent'])
+            )
+        )
+    ); 
