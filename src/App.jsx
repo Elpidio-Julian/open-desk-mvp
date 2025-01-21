@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import MyTickets from './pages/MyTickets';
 import { AuthProvider } from './contexts/AuthContext';
 import { RoleProvider } from './contexts/RoleContext';
 import { useAuth } from './contexts/AuthContext';
@@ -25,6 +26,14 @@ const AppRoutes = () => {
         element={
           <ProtectedRoute>
             <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/my-tickets"
+        element={
+          <ProtectedRoute>
+            <MyTickets />
           </ProtectedRoute>
         }
       />
