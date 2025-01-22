@@ -58,4 +58,27 @@ CREATE OR REPLACE TRIGGER on_ticket_change
 CREATE OR REPLACE TRIGGER on_ticket_tag_change
     AFTER INSERT OR DELETE ON ticket_tags
     FOR EACH ROW
-    EXECUTE FUNCTION record_ticket_tag_history(); 
+    EXECUTE FUNCTION record_ticket_tag_history();
+
+-- Function to handle ticket status changes and set timestamps
+CREATE OR REPLACE FUNCTION handle_ticket_status_change()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Set resolved_at when status changes to resolved
+    IF NEW.status = 'resolved' AND (OLD.status != 'resolved' OR OLD.resolved_at IS NULL) THEN
+        NEW.resolved_at = CURRENT_TIMESTAMP;
+    -- Clear resolved_at if status changes from resolved to something else
+    ELSIF NEW.status != 'resolved' AND OLD.status = 'resolved' THEN
+        NEW.resolved_at = NULL;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger to automatically handle ticket status changes
+DROP TRIGGER IF EXISTS on_ticket_status_change ON tickets;
+CREATE TRIGGER on_ticket_status_change
+    BEFORE UPDATE OF status ON tickets
+    FOR EACH ROW
+    EXECUTE FUNCTION handle_ticket_status_change(); 

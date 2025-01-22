@@ -9,7 +9,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { RoleProvider } from './contexts/RoleContext';
 import { useAuth } from './contexts/AuthContext';
 import { useRole } from './contexts/RoleContext';
-
+import AgentMetricsPage from './components/AgentView/pages/AgentMetricsPage';
 // Protected route wrapper with role check
 const ProtectedRoute = ({ children, requiredRole }) => {
   const { user } = useAuth();
@@ -57,6 +57,14 @@ const AppRoutes = () => {
         element={
           <ProtectedRoute>
             <SupportQueuePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/agent-performance-metrics"
+        element={
+          <ProtectedRoute>
+            <AgentMetricsPage />
           </ProtectedRoute>
         }
       />
