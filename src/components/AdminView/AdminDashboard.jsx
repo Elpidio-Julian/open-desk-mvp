@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Card } from '../ui/card';
 import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import TeamManagement from './TeamManagement';
+import AdminAnalytics from './AdminAnalytics';
 
 const AdminDashboard = ({ 
   isWidget = false, 
@@ -44,108 +44,14 @@ const AdminDashboard = ({
           </TabsList>
 
           <TabsContent value="teams" className="space-y-4">
-            <Card>
-              <div className="p-4">
-                <h3 className="text-xl font-semibold mb-4">Teams</h3>
-                <div className="space-y-4">
-                  <div className="flex gap-4">
-                    <Input placeholder="Team Name" />
-                    <Select>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select Focus Area" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="technical">Technical Support</SelectItem>
-                        <SelectItem value="billing">Billing Support</SelectItem>
-                        <SelectItem value="general">General Support</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button variant="secondary">Add Team</Button>
-                  </div>
-                  
-                  <div className="border rounded-lg p-4">
-                    <h4 className="font-medium mb-2">Technical Support Team</h4>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Select>
-                          <SelectTrigger className="flex-1">
-                            <SelectValue placeholder="Add Agent" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="agent1">John Doe</SelectItem>
-                            <SelectItem value="agent2">Jane Smith</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Select>
-                          <SelectTrigger className="flex-1">
-                            <SelectValue placeholder="Select Skills" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="javascript">JavaScript</SelectItem>
-                            <SelectItem value="python">Python</SelectItem>
-                            <SelectItem value="database">Database</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Button variant="outline">Add</Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Card>
+            <TeamManagement />
           </TabsContent>
 
           <TabsContent value="routing" className="space-y-4">
             <Card>
               <div className="p-4">
                 <h3 className="text-xl font-semibold mb-4">Routing Rules</h3>
-                <div className="space-y-4">
-                  <div className="border rounded-lg p-4">
-                    <h4 className="font-medium mb-2">Rule-Based Assignment</h4>
-                    <div className="space-y-2">
-                      <Select>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select Property" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="priority">Priority</SelectItem>
-                          <SelectItem value="category">Category</SelectItem>
-                          <SelectItem value="language">Language</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Assign To Team" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="technical">Technical Support</SelectItem>
-                          <SelectItem value="billing">Billing Support</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Button variant="secondary">Add Rule</Button>
-                    </div>
-                  </div>
-
-                  <div className="border rounded-lg p-4">
-                    <h4 className="font-medium mb-2">Load Balancing</h4>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Input type="number" placeholder="Max tickets per agent" />
-                        <Select>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Time Zone" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="est">EST</SelectItem>
-                            <SelectItem value="pst">PST</SelectItem>
-                            <SelectItem value="utc">UTC</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <Button variant="secondary">Update Settings</Button>
-                    </div>
-                  </div>
-                </div>
+                <div className="text-muted-foreground">Routing rules configuration coming soon...</div>
               </div>
             </Card>
           </TabsContent>
@@ -154,7 +60,7 @@ const AdminDashboard = ({
             <Card>
               <div className="p-4">
                 <h3 className="text-xl font-semibold mb-4">Team Performance</h3>
-                <div className="text-muted-foreground">Analytics dashboard coming soon...</div>
+                <AdminAnalytics />
               </div>
             </Card>
           </TabsContent>
