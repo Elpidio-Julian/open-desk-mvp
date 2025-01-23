@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../../services/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '../ui/chart';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Skeleton } from '../ui/skeleton';
+import { analyticsService } from '../../services/api/analytics';
 
 const MetricCard = ({ title, value, subtitle, trend, loading }) => (
   <Card>
@@ -101,39 +101,16 @@ const AgentPerformanceMetrics = () => {
       setLoading(true);
       setError(null);
 
-      // Fetch active tickets metrics
-      const { data: activeData, error: activeError } = await supabase.rpc(
-        'get_agent_active_tickets',
-        { 
-          agent_id: user.id,
-          time_period: `${timeRange} days`
-        }
+      const { data, error: metricsError } = await analyticsService.getAllAgentMetrics(
+        user.id,
+        `${timeRange} days`
       );
-      if (activeError) throw activeError;
-      setActiveTickets(activeData[0]);
 
-      // Fetch response time metrics
-      const { data: responseData, error: responseError } = await supabase.rpc(
-        'get_agent_response_metrics',
-        {
-          agent_id: user.id,
-          time_period: `${timeRange} days`
-        }
-      );
-      if (responseError) throw responseError;
-      setResponseMetrics(responseData[0]);
+      if (metricsError) throw metricsError;
 
-      // Fetch resolution metrics
-      const { data: resolutionData, error: resolutionError } = await supabase.rpc(
-        'get_agent_resolution_metrics',
-        {
-          agent_id: user.id,
-          time_period: `${timeRange} days`
-        }
-      );
-      if (resolutionError) throw resolutionError;
-      setResolutionMetrics(resolutionData[0]);
-
+      setActiveTickets(data.activeTickets);
+      setResponseMetrics(data.response);
+      setResolutionMetrics(data.resolution);
     } catch (err) {
       console.error('Error in fetchMetrics:', err);
       setError(err.message);

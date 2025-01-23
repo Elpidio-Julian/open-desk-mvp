@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../../services/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -8,6 +7,7 @@ import Table from '../SharedComponents/Table/Table';
 import Modal from '../SharedComponents/Modal/Modal';
 import Input from '../SharedComponents/Form/Input';
 import Alert from '../SharedComponents/Notification/Alert';
+import { ticketsService } from '../../services/api/tickets';
 
 const MARKDOWN_TIPS = `
 ### Markdown Tips:
@@ -68,140 +68,100 @@ const SupportQueue = ({
   const fetchTickets = async () => {
     setIsLoading(true);
     try {
-      let query = supabase
-        .from('tickets')
-        .select(`
-          *,
-          created_by:users!tickets_created_by_fkey(full_name, email),
-          assigned_to:users!tickets_assigned_to_fkey(full_name, email),
-          comments(count)
-        `);
-
-      switch (currentView) {
-        case TICKET_VIEWS.UNASSIGNED:
-          query = query.is('assigned_to', null);
-          break;
-        case TICKET_VIEWS.MY_TICKETS:
-          query = query.eq('assigned_to', user.id);
-          break;
-        case TICKET_VIEWS.URGENT:
-          query = query.eq('priority', 'urgent');
-          break;
-      }
-
-      if (statusFilter !== 'all') {
-        query = query.eq('status', statusFilter);
-      }
-      if (priorityFilter !== 'all') {
-        query = query.eq('priority', priorityFilter);
-      }
-
-      query = query.order('priority', { ascending: false })
-                  .order('created_at', { ascending: false });
-
-      const { data, error } = await query;
-
+      const { data, error } = await ticketsService.getTickets({
+        view: currentView,
+        status: statusFilter !== 'all' ? statusFilter : undefined,
+        priority: priorityFilter !== 'all' ? priorityFilter : undefined,
+        userId: currentView === TICKET_VIEWS.MY_TICKETS ? user.id : undefined
+      });
+      
       if (error) throw error;
       setTickets(data);
     } catch (error) {
-      setAlert({
-        type: 'error',
-        message: 'Failed to fetch tickets: ' + error.message,
-      });
+      setAlert({ type: 'error', message: error.message });
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleBulkAssign = async () => {
+  const handleAssignTicket = async (ticketId) => {
     try {
-      const { error } = await supabase
-        .from('tickets')
-        .update({ assigned_to: user.id })
-        .in('id', Array.from(selectedTickets));
-
+      const { error } = await ticketsService.bulkAssign([ticketId], user.id);
       if (error) throw error;
-
-      setAlert({
-        type: 'success',
-        message: 'Tickets assigned successfully',
-      });
-      setSelectedTickets(new Set());
-      fetchTickets();
+      await fetchTickets();
+      setAlert({ type: 'success', message: 'Ticket assigned successfully' });
     } catch (error) {
-      setAlert({
-        type: 'error',
-        message: 'Failed to assign tickets: ' + error.message,
-      });
+      setAlert({ type: 'error', message: error.message });
     }
   };
 
-  const handleBulkUpdateStatus = async (status) => {
+  const handleBulkAssign = async () => {
     try {
-      const { error } = await supabase
-        .from('tickets')
-        .update({ status })
-        .in('id', Array.from(selectedTickets));
-
+      const { error } = await ticketsService.bulkAssign(Array.from(selectedTickets), user.id);
       if (error) throw error;
-
-      setAlert({
-        type: 'success',
-        message: 'Tickets updated successfully',
-      });
       setSelectedTickets(new Set());
-      fetchTickets();
+      await fetchTickets();
+      setAlert({ type: 'success', message: 'Tickets assigned successfully' });
     } catch (error) {
-      setAlert({
-        type: 'error',
-        message: 'Failed to update tickets: ' + error.message,
-      });
+      setAlert({ type: 'error', message: error.message });
+    }
+  };
+
+  const handleStatusUpdate = async (ticketId, newStatus) => {
+    try {
+      const { error } = await ticketsService.updateTicket(ticketId, { status: newStatus });
+      if (error) throw error;
+      await fetchTickets();
+      setAlert({ type: 'success', message: 'Status updated successfully' });
+    } catch (error) {
+      setAlert({ type: 'error', message: error.message });
+    }
+  };
+
+  const handleBulkStatusUpdate = async (newStatus) => {
+    try {
+      const { error } = await ticketsService.bulkUpdateStatus(Array.from(selectedTickets), newStatus);
+      if (error) throw error;
+      setSelectedTickets(new Set());
+      await fetchTickets();
+      setAlert({ type: 'success', message: 'Statuses updated successfully' });
+    } catch (error) {
+      setAlert({ type: 'error', message: error.message });
+    }
+  };
+
+  const handleAddComment = async (ticketId, content, isInternal) => {
+    try {
+      const { error } = await ticketsService.addComment(ticketId, user.id, content, isInternal);
+      if (error) throw error;
+      await fetchTickets();
+      setAlert({ type: 'success', message: 'Comment added successfully' });
+    } catch (error) {
+      setAlert({ type: 'error', message: error.message });
     }
   };
 
   const fetchTicketDetails = async (ticketId) => {
     try {
-      const { data: ticket, error: ticketError } = await supabase
-        .from('tickets')
-        .select(`
-          *,
-          created_by:users!tickets_created_by_fkey(id, full_name, email),
-          assigned_to:users!tickets_assigned_to_fkey(id, full_name, email)
-        `)
-        .eq('id', ticketId)
-        .single();
+      const [ticketResponse, commentsResponse] = await Promise.all([
+        ticketsService.getTicketDetails(ticketId),
+        ticketsService.getComments(ticketId)
+      ]);
 
-      if (ticketError) throw ticketError;
-      setTicketDetails(ticket);
+      if (ticketResponse.error) throw ticketResponse.error;
+      if (commentsResponse.error) throw commentsResponse.error;
 
-      const { data: comments, error: commentsError } = await supabase
-        .from('comments')
-        .select(`
-          *,
-          user:users(full_name, email)
-        `)
-        .eq('ticket_id', ticketId)
-        .order('created_at', { ascending: true });
+      setTicketDetails(ticketResponse.data);
+      setTicketComments(commentsResponse.data);
 
-      if (commentsError) throw commentsError;
-      setTicketComments(comments);
-
-      const { data: history, error: historyError } = await supabase
-        .from('tickets')
-        .select(`
-          id,
-          title,
-          status,
-          priority,
-          created_at,
-          resolved_at
-        `)
-        .eq('created_by', ticket.created_by.id)
-        .order('created_at', { ascending: false });
-
-      if (historyError) throw historyError;
-      setCustomerHistory(history);
-
+      // Fetch customer history if ticket has a creator
+      if (ticketResponse.data.created_by?.id) {
+        const { data: history, error: historyError } = await ticketsService.getCustomerHistory(
+          ticketResponse.data.created_by.id
+        );
+        if (historyError) throw historyError;
+        setCustomerHistory(history);
+      }
     } catch (error) {
       setAlert({
         type: 'error',
@@ -218,11 +178,7 @@ const SupportQueue = ({
 
   const handleUpdateTicket = async (updates) => {
     try {
-      const { error } = await supabase
-        .from('tickets')
-        .update(updates)
-        .eq('id', selectedTicket.id);
-
+      const { error } = await ticketsService.updateTicket(selectedTicket.id, updates);
       if (error) throw error;
 
       await fetchTicketDetails(selectedTicket.id);
@@ -237,35 +193,6 @@ const SupportQueue = ({
         type: 'error',
         message: 'Failed to update ticket: ' + error.message,
       });
-    }
-  };
-
-  const handleAddComment = async () => {
-    if (!newComment.trim()) return;
-
-    setIsSubmittingComment(true);
-    try {
-      const { error } = await supabase.from('comments').insert([
-        {
-          ticket_id: selectedTicket.id,
-          user_id: user.id,
-          content: newComment.trim(),
-          is_internal: isInternalNote,
-        },
-      ]);
-
-      if (error) throw error;
-
-      await fetchTicketDetails(selectedTicket.id);
-      setNewComment('');
-      setIsInternalNote(false);
-    } catch (error) {
-      setAlert({
-        type: 'error',
-        message: 'Failed to add comment: ' + error.message,
-      });
-    } finally {
-      setIsSubmittingComment(false);
     }
   };
 
@@ -424,7 +351,7 @@ const SupportQueue = ({
               Assign to Me
             </Button>
             <select
-              onChange={(e) => handleBulkUpdateStatus(e.target.value)}
+              onChange={(e) => handleBulkStatusUpdate(e.target.value)}
               className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
             >
               <option value="">Update Status</option>
@@ -706,7 +633,7 @@ const SupportQueue = ({
                   <div className="flex justify-end">
                     <Button
                       variant="primary"
-                      onClick={handleAddComment}
+                      onClick={() => handleAddComment(selectedTicket.id, newComment, isInternalNote)}
                       disabled={!newComment.trim() || isSubmittingComment}
                     >
                       {isSubmittingComment ? 'Sending...' : isInternalNote ? 'Add Note' : 'Send Response'}

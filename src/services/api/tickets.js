@@ -13,6 +13,41 @@ export const ticketsService = {
   },
 
   // Read operations
+  getTickets: async ({ view, status, priority, userId }) => {
+    let query = supabase
+      .from('tickets')
+      .select(`
+        *,
+        created_by:users!tickets_created_by_fkey(full_name, email),
+        assigned_to:users!tickets_assigned_to_fkey(full_name, email),
+        comments(count)
+      `);
+
+    // Apply view filters
+    switch (view) {
+      case 'unassigned':
+        query = query.is('assigned_to', null);
+        break;
+      case 'my_tickets':
+        query = query.eq('assigned_to', userId);
+        break;
+      case 'urgent':
+        query = query.eq('priority', 'urgent');
+        break;
+    }
+
+    // Apply status and priority filters
+    if (status) query = query.eq('status', status);
+    if (priority) query = query.eq('priority', priority);
+
+    // Apply sorting
+    query = query.order('priority', { ascending: false })
+                .order('created_at', { ascending: false });
+
+    const { data, error } = await query;
+    return { data, error };
+  },
+
   getByUser: async (userId) => {
     const { data, error } = await supabase
       .from('tickets')
@@ -26,6 +61,44 @@ export const ticketsService = {
       .from('tickets')
       .select('*')
       .eq('assigned_to', agentId);
+    return { data, error };
+  },
+
+  getTicketDetails: async (ticketId) => {
+    const { data, error } = await supabase
+      .from('tickets')
+      .select(`
+        *,
+        created_by:users!tickets_created_by_fkey(id, full_name, email),
+        assigned_to:users!tickets_assigned_to_fkey(id, full_name, email)
+      `)
+      .eq('id', ticketId)
+      .single();
+    return { data, error };
+  },
+
+  getCustomerHistory: async (customerId) => {
+    const { data, error } = await supabase
+      .from('tickets')
+      .select(`
+        id,
+        title,
+        status,
+        priority,
+        created_at,
+        resolved_at
+      `)
+      .eq('created_by', customerId)
+      .order('created_at', { ascending: false });
+    return { data, error };
+  },
+
+  // Update operations
+  updateTicket: async (ticketId, updates) => {
+    const { data, error } = await supabase
+      .from('tickets')
+      .update(updates)
+      .eq('id', ticketId);
     return { data, error };
   },
 
@@ -64,11 +137,7 @@ export const ticketsService = {
       .from('comments')
       .select(`
         *,
-        user:user_id (
-          id,
-          full_name,
-          email
-        )
+        user:users(full_name, email)
       `)
       .eq('ticket_id', ticketId)
       .order('created_at', { ascending: true });
