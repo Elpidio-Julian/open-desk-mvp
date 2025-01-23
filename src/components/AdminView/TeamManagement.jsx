@@ -4,7 +4,6 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Badge } from '../ui/badge';
-import { supabase } from '../../services/supabase';
 import { Alert, AlertDescription } from '../ui/alert';
 import { Loader2, Pencil, Trash2 } from 'lucide-react';
 import {
@@ -16,6 +15,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { useDebounce } from '../../hooks/useDebounce';
+import { teamsService } from '../../services/api/teams';
 
 const FOCUS_AREAS = [
   { value: 'technical', label: 'Technical Support' },
@@ -35,41 +35,18 @@ const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
 const TeamManagement = () => {
   const [teams, setTeams] = useState([]);
   const [agents, setAgents] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [selectedAgents, setSelectedAgents] = useState({});
+  const [agentPages, setAgentPages] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [agentLoading, setAgentLoading] = useState({});
   const [error, setError] = useState(null);
   const [newTeam, setNewTeam] = useState({ name: '', focusArea: '' });
-  const [selectedTeam, setSelectedTeam] = useState(null);
-  const [selectedSkill, setSelectedSkill] = useState('');
-  const [selectedAgents, setSelectedAgents] = useState({});
   const [editingTeam, setEditingTeam] = useState(null);
+  const [selectedTeam, setSelectedTeam] = useState(null);
   const [deleteConfirmTeam, setDeleteConfirmTeam] = useState(null);
-  const [agentCache, setAgentCache] = useState({});
-  const [agentPages, setAgentPages] = useState({});
   const [agentSearch, setAgentSearch] = useState('');
-  const [agentLoading, setAgentLoading] = useState({});
+  const [selectedSkills, setSelectedSkills] = useState({});
   const debouncedSearch = useDebounce(agentSearch, 300);
-
-  // Cache management
-  const getCachedData = (key) => {
-    const cached = agentCache[key];
-    if (!cached) return null;
-    if (Date.now() - cached.timestamp > CACHE_DURATION) {
-      // Cache expired
-      delete agentCache[key];
-      return null;
-    }
-    return cached.data;
-  };
-
-  const setCachedData = (key, data) => {
-    setAgentCache(prev => ({
-      ...prev,
-      [key]: {
-        data,
-        timestamp: Date.now()
-      }
-    }));
-  };
 
   useEffect(() => {
     fetchTeamsAndAgents();
@@ -80,8 +57,7 @@ const TeamManagement = () => {
       setLoading(true);
       setError(null);
 
-      // Fetch teams
-      const { data: teamsData, error: teamsError } = await supabase.rpc('list_teams');
+      const { data: teamsData, error: teamsError } = await teamsService.listTeams();
       if (teamsError) throw new Error('Failed to fetch teams: ' + teamsError.message);
 
       setTeams(teamsData || []);
@@ -107,64 +83,21 @@ const TeamManagement = () => {
     try {
       setAgentLoading(prev => ({ ...prev, [teamId]: true }));
 
-      // Check cache first
-      const cacheKey = `${teamId}-${page}-${search}`;
-      const cachedData = getCachedData(cacheKey);
-      if (cachedData) {
-        setAgents(prev => ({
-          ...prev,
-          [teamId]: cachedData
-        }));
-        return;
-      }
+      const { data: availableAgents, error: agentsError, count } = 
+        await teamsService.getAvailableAgents(teamId, page, search, ITEMS_PER_PAGE);
 
-      // Get available agents with pagination and search
-      let query = supabase
-        .from('users')
-        .select('id, full_name, email, role', { count: 'exact' })
-        .eq('role', 'agent')
-        .order('full_name');
+      if (agentsError) throw agentsError;
 
-      // Add search if provided
-      if (search) {
-        query = query.ilike('full_name', `%${search}%`);
-      }
-
-      // Get current team members to exclude
-      const { data: teamMembers } = await supabase
-        .from('team_members')
-        .select('user_id')
-        .eq('team_id', teamId);
-
-      // Only add the not-in filter if there are team members
-      if (teamMembers && teamMembers.length > 0) {
-        const memberIds = teamMembers.map(tm => tm.user_id);
-        query = query.not('id', 'in', memberIds);
-      }
-
-      // Add pagination
-      query = query.range((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE - 1);
-
-      const { data: availableAgents, error: agentsError, count } = await query;
-
-      if (agentsError) {
-        throw new Error(`Failed to fetch agents for team ${teamId}: ${agentsError.message}`);
-      }
-
-      // Cache the results
-      const resultData = {
-        agents: availableAgents || [],
-        totalPages: Math.ceil((count || 0) / ITEMS_PER_PAGE)
-      };
-
-      setCachedData(cacheKey, resultData);
       setAgents(prev => ({
         ...prev,
-        [teamId]: resultData
+        [teamId]: {
+          items: availableAgents || [],
+          totalCount: count || 0
+        }
       }));
-    } catch (err) {
-      console.error('Error fetching agents:', err);
-      setError(err.message);
+    } catch (error) {
+      console.error('Error fetching agents:', error);
+      setError(error.message);
     } finally {
       setAgentLoading(prev => ({ ...prev, [teamId]: false }));
     }
@@ -189,11 +122,7 @@ const TeamManagement = () => {
       setLoading(true);
       setError(null);
 
-      const { data, error } = await supabase.rpc('create_team', {
-        team_name: newTeam.name,
-        team_focus_area: newTeam.focusArea
-      });
-
+      const { error } = await teamsService.createTeam(newTeam);
       if (error) throw error;
 
       await fetchTeamsAndAgents();
@@ -209,20 +138,12 @@ const TeamManagement = () => {
   const addMemberToTeam = async (teamId, userId) => {
     try {
       setError(null);
-      const { error } = await supabase.rpc('add_team_member', {
-        team_id: teamId,
-        user_id: userId
-      });
-
+      const { error } = await teamsService.addTeamMember(teamId, userId);
       if (error) throw error;
       
-      // Clear the selection for this team
       setSelectedAgents(prev => ({ ...prev, [teamId]: '' }));
-      
-      // Refresh teams and available agents
       await fetchTeamsAndAgents();
       
-      // If team details are open, refresh them
       if (selectedTeam?.team.id === teamId) {
         await viewTeamDetails(teamId);
       }
@@ -235,11 +156,7 @@ const TeamManagement = () => {
   const addSkillToTeam = async (teamId, skill) => {
     try {
       setError(null);
-      const { error } = await supabase.rpc('add_team_skill', {
-        team_id: teamId,
-        skill_name: skill
-      });
-
+      const { error } = await teamsService.addTeamSkill(teamId, skill);
       if (error) throw error;
       await fetchTeamsAndAgents();
     } catch (err) {
@@ -251,10 +168,7 @@ const TeamManagement = () => {
   const viewTeamDetails = async (teamId) => {
     try {
       setError(null);
-      const { data, error } = await supabase.rpc('get_team_details', {
-        team_id: teamId
-      });
-
+      const { data, error } = await teamsService.getTeamDetails(teamId);
       if (error) throw error;
       setSelectedTeam(data);
     } catch (err) {
@@ -266,12 +180,7 @@ const TeamManagement = () => {
   const updateTeam = async (teamId, updatedData) => {
     try {
       setError(null);
-      const { data, error } = await supabase.rpc('update_team', {
-        team_id: teamId,
-        new_name: updatedData.name,
-        new_focus_area: updatedData.focusArea
-      });
-
+      const { error } = await teamsService.updateTeam(teamId, updatedData);
       if (error) throw error;
       await fetchTeamsAndAgents();
       setEditingTeam(null);
@@ -284,10 +193,7 @@ const TeamManagement = () => {
   const deleteTeam = async (teamId) => {
     try {
       setError(null);
-      const { error } = await supabase.rpc('delete_team', {
-        team_id: teamId
-      });
-
+      const { error } = await teamsService.deleteTeam(teamId);
       if (error) throw error;
       await fetchTeamsAndAgents();
       setDeleteConfirmTeam(null);
@@ -300,11 +206,7 @@ const TeamManagement = () => {
   const removeMemberFromTeam = async (teamId, userId) => {
     try {
       setError(null);
-      const { error } = await supabase.rpc('remove_team_member', {
-        team_id: teamId,
-        user_id: userId
-      });
-
+      const { error } = await teamsService.removeTeamMember(teamId, userId);
       if (error) throw error;
       await fetchTeamsAndAgents();
       if (selectedTeam?.team.id === teamId) {
@@ -319,11 +221,7 @@ const TeamManagement = () => {
   const removeSkillFromTeam = async (teamId, skill) => {
     try {
       setError(null);
-      const { error } = await supabase.rpc('remove_team_skill', {
-        team_id: teamId,
-        skill_name: skill
-      });
-
+      const { error } = await teamsService.removeTeamSkill(teamId, skill);
       if (error) throw error;
       await fetchTeamsAndAgents();
       if (selectedTeam?.team.id === teamId) {
@@ -438,7 +336,7 @@ const TeamManagement = () => {
                       <SelectItem value="" disabled>
                         Loading...
                       </SelectItem>
-                    ) : agents[team.id]?.agents.map((agent) => (
+                    ) : agents[team.id]?.items.map((agent) => (
                       <SelectItem key={agent.id} value={agent.id}>
                         {agent.full_name}
                       </SelectItem>
@@ -457,7 +355,7 @@ const TeamManagement = () => {
                   Add
                 </Button>
               </div>
-              {agents[team.id]?.totalPages > 1 && (
+              {agents[team.id]?.totalCount > 1 && (
                 <div className="flex justify-center gap-2 mt-2">
                   <Button
                     variant="outline"
@@ -468,13 +366,13 @@ const TeamManagement = () => {
                     Previous
                   </Button>
                   <span className="py-1">
-                    Page {agentPages[team.id]} of {agents[team.id]?.totalPages}
+                    Page {agentPages[team.id]} of {Math.ceil(agents[team.id]?.totalCount / ITEMS_PER_PAGE)}
                   </span>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => handlePageChange(team.id, agentPages[team.id] + 1)}
-                    disabled={agentPages[team.id] === agents[team.id]?.totalPages || agentLoading[team.id]}
+                    disabled={agentPages[team.id] === Math.ceil(agents[team.id]?.totalCount / ITEMS_PER_PAGE) || agentLoading[team.id]}
                   >
                     Next
                   </Button>
@@ -485,8 +383,8 @@ const TeamManagement = () => {
             {/* Add Skill */}
             <div className="flex gap-2">
               <Select
-                value={selectedSkill}
-                onValueChange={setSelectedSkill}
+                value={selectedSkills[team.id] || ''}
+                onValueChange={(value) => setSelectedSkills(prev => ({ ...prev, [team.id]: value }))}
               >
                 <SelectTrigger className="w-[200px]">
                   <SelectValue placeholder="Add Skill" />
@@ -502,12 +400,12 @@ const TeamManagement = () => {
               <Button
                 variant="outline"
                 onClick={() => {
-                  if (selectedSkill) {
-                    addSkillToTeam(team.id, selectedSkill);
-                    setSelectedSkill('');
+                  if (selectedSkills[team.id]) {
+                    addSkillToTeam(team.id, selectedSkills[team.id]);
+                    setSelectedSkills(prev => ({ ...prev, [team.id]: '' }));
                   }
                 }}
-                disabled={!selectedSkill}
+                disabled={!selectedSkills[team.id]}
               >
                 Add
               </Button>

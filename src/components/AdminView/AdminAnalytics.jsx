@@ -4,8 +4,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { ChartContainer } from '../ui/chart';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, BarChart, Bar } from 'recharts';
-import { supabase } from '../../services/supabase';
 import { Alert, AlertDescription } from '../ui/alert';
+import { analyticsService } from '../../services/api/analytics';
 
 const TIME_PERIODS = {
   '7d': { days: 7, label: 'Last 7 Days' },
@@ -42,11 +42,8 @@ const AdminAnalytics = () => {
       setLoading(true);
       setError(null);
       try {
-        // Fetch metrics for all agents
-        const { data: agents, error: agentsError } = await supabase
-          .from('users')
-          .select('id, full_name, email')
-          .eq('role', 'agent');
+        // Fetch all agents
+        const { data: agents, error: agentsError } = await analyticsService.getAllAgents();
 
         if (agentsError) {
           throw new Error('Failed to fetch agents: ' + agentsError.message);
@@ -60,34 +57,21 @@ const AdminAnalytics = () => {
           return;
         }
 
+        // Fetch metrics for each agent
         const metricsPromises = agents.map(async (agent) => {
           try {
-            const [activeTickets, response, resolution] = await Promise.all([
-              supabase.rpc('get_agent_active_tickets', { 
-                agent_id: agent.id,
-                time_period: `${TIME_PERIODS[timePeriod].days} days`
-              }),
-              supabase.rpc('get_agent_response_metrics', { 
-                agent_id: agent.id,
-                time_period: `${TIME_PERIODS[timePeriod].days} days`
-              }),
-              supabase.rpc('get_agent_resolution_metrics', { 
-                agent_id: agent.id,
-                time_period: `${TIME_PERIODS[timePeriod].days} days`
-              })
-            ]);
+            const { data, error: metricsError } = await analyticsService.getAllAgentMetrics(
+              agent.id,
+              `${TIME_PERIODS[timePeriod].days} days`
+            );
 
-            if (activeTickets.error) throw new Error(`Active tickets error: ${activeTickets.error.message}`);
-            if (response.error) throw new Error(`Response metrics error: ${response.error.message}`);
-            if (resolution.error) throw new Error(`Resolution metrics error: ${resolution.error.message}`);
+            if (metricsError) throw metricsError;
 
             return {
               agent_id: agent.id,
               full_name: agent.full_name,
               email: agent.email,
-              activeTickets: activeTickets.data?.[0] || { total_active: 0, by_status: {} },
-              response: response.data?.[0] || { avg_first_response: 0, avg_response_time: 0, response_time_trend: [] },
-              resolution: resolution.data?.[0] || { total_resolved: 0, avg_resolution_time: 0, resolution_rate: 0, resolution_trend: [] }
+              ...data
             };
           } catch (error) {
             console.error(`Error fetching metrics for agent ${agent.id}:`, error);
