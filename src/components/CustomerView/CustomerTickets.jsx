@@ -2,12 +2,38 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import Button from '../SharedComponents/Button/Button';
-import Table from '../SharedComponents/Table/Table';
-import Modal from '../SharedComponents/Modal/Modal';
-import Input from '../SharedComponents/Form/Input';
-import Alert from '../SharedComponents/Notification/Alert';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogDescription,
+  DialogFooter,
+} from "../ui/dialog";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
+import { Badge } from "../ui/badge";
+import { Alert, AlertDescription } from "../ui/alert";
 import { customersService } from '../../services/api/customers';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
+import { Label } from "../ui/label";
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 const MARKDOWN_TIPS = `
 ### Markdown Tips:
@@ -28,12 +54,15 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
   const [ticketComments, setTicketComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
-  const [newTicket, setNewTicket] = useState({ title: '', description: '' });
+  const [newTicket, setNewTicket] = useState({ title: '', description: '', priority: 'medium' });
   const [alert, setAlert] = useState(null);
   const [showMarkdownTips, setShowMarkdownTips] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [expandedComments, setExpandedComments] = useState(false);
   const INITIAL_COMMENTS_TO_SHOW = 3;
+  const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
+  const [feedback, setFeedback] = useState({ rating: '5', comment: '' });
+  const [showClosedTickets, setShowClosedTickets] = useState(false);
 
   useEffect(() => {
     fetchTickets();
@@ -86,6 +115,7 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
         title: newTicket.title,
         description: newTicket.description,
         created_by: user.id,
+        priority: newTicket.priority,
       });
 
       if (error) throw error;
@@ -95,7 +125,7 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
         message: 'Ticket created successfully!',
       });
       setIsNewTicketModalOpen(false);
-      setNewTicket({ title: '', description: '' });
+      setNewTicket({ title: '', description: '', priority: 'medium' });
       fetchTickets();
     } catch (error) {
       setAlert({
@@ -129,15 +159,115 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
     }
   };
 
+  const handleResolveTicket = async () => {
+    try {
+      const { error } = await customersService.updateTicket(selectedTicket.id, {
+        status: 'resolved'
+      });
+
+      if (error) throw error;
+
+      setAlert({
+        type: 'success',
+        message: 'Ticket resolved successfully!'
+      });
+      
+      // Update the selected ticket locally
+      setSelectedTicket({
+        ...selectedTicket,
+        status: 'resolved'
+      });
+      
+      // Refresh tickets list
+      fetchTickets();
+    } catch (error) {
+      setAlert({
+        type: 'error',
+        message: 'Failed to resolve ticket: ' + error.message
+      });
+    }
+  };
+
+  const handleSubmitFeedback = async () => {
+    try {
+      // Update ticket status to closed
+      const { error: updateError } = await customersService.updateTicket(selectedTicket.id, {
+        status: 'closed',
+        feedback_rating: parseInt(feedback.rating),
+        feedback_comment: feedback.comment
+      });
+
+      if (updateError) throw updateError;
+
+      setAlert({
+        type: 'success',
+        message: 'Thank you for your feedback!'
+      });
+      
+      // Update the selected ticket locally
+      setSelectedTicket({
+        ...selectedTicket,
+        status: 'closed',
+        feedback_rating: parseInt(feedback.rating),
+        feedback_comment: feedback.comment
+      });
+      
+      // Reset feedback form
+      setFeedback({ rating: '5', comment: '' });
+      setShowFeedbackDialog(false);
+      
+      // Refresh tickets list
+      fetchTickets();
+    } catch (error) {
+      setAlert({
+        type: 'error',
+        message: 'Failed to submit feedback: ' + error.message
+      });
+    }
+  };
+
   const columns = [
-    { header: 'Title', field: 'title' },
-    { header: 'Status', field: 'status' },
     {
-      header: 'Created',
-      field: 'created_at',
-      render: (row) => new Date(row.created_at).toLocaleDateString(),
+      accessorKey: "title",
+      header: "Title",
+      cell: ({ row }) => (
+        <div className="font-medium">{row.original.title}</div>
+      ),
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ row }) => (
+        <Badge variant={getStatusVariant(row.original.status)}>
+          {row.original.status}
+        </Badge>
+      ),
+    },
+    {
+      accessorKey: "created_at",
+      header: "Created",
+      cell: ({ row }) => (
+        <div className="text-muted-foreground">
+          {new Date(row.original.created_at).toLocaleDateString()}
+        </div>
+      ),
     },
   ];
+
+  const getStatusVariant = (status) => {
+    switch (status.toLowerCase()) {
+      case 'open':
+        return 'default';
+      case 'in_progress':
+        return 'secondary';
+      case 'resolved':
+        return 'success';
+      case 'closed':
+        return 'secondary';
+      default:
+        return 'default';
+    }
+  };
 
   const containerStyle = {
     maxHeight: maxHeight || 'auto',
@@ -149,266 +279,304 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
     }),
   };
 
+  // Separate active and closed tickets
+  const activeTickets = tickets.filter(ticket => ticket.status !== 'closed');
+  const closedTickets = tickets.filter(ticket => ticket.status === 'closed');
+
   return (
-    <div className="px-4 py-8" style={containerStyle}>
+    <div className="p-8" style={containerStyle}>
       {alert && (
-        <div className="mb-4">
-          <Alert
-            type={alert.type}
-            message={alert.message}
-            onClose={() => setAlert(null)}
-          />
-        </div>
+        <Alert variant={alert.type === 'error' ? 'destructive' : 'default'} className="mb-4">
+          <AlertDescription>{alert.message}</AlertDescription>
+        </Alert>
       )}
 
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">My Support Tickets</h1>
+        <h1 className="text-2xl font-bold">My Support Tickets</h1>
         <div className="flex gap-2">
-          <Button
-            variant="primary"
-            onClick={() => setIsNewTicketModalOpen(true)}
-          >
+          <Button onClick={() => setIsNewTicketModalOpen(true)}>
             Create New Ticket
           </Button>
           {isWidget && onClose && (
-            <Button variant="secondary" onClick={onClose}>
+            <Button variant="outline" onClick={onClose}>
               Close
             </Button>
           )}
         </div>
       </div>
 
-      <Table
-        columns={columns}
-        data={tickets}
-        onRowClick={handleTicketClick}
-      />
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              {columns.map((column) => (
+                <TableHead key={column.accessorKey}>
+                  {column.header}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {activeTickets.map((ticket) => (
+              <TableRow
+                key={ticket.id}
+                onClick={() => handleTicketClick(ticket)}
+                className="cursor-pointer"
+              >
+                {columns.map((column) => (
+                  <TableCell key={`${ticket.id}-${column.accessorKey}`}>
+                    {column.cell({ row: { original: ticket } })}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+            {activeTickets.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={columns.length} className="text-center text-muted-foreground">
+                  No active tickets found
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
 
-      {/* New Ticket Modal */}
-      <Modal
-        isOpen={isNewTicketModalOpen}
-        onClose={() => setIsNewTicketModalOpen(false)}
-        title="Create New Support Ticket"
-      >
-        <div className="space-y-4">
-          <Input
-            label="Title"
-            value={newTicket.title}
-            onChange={(e) =>
-              setNewTicket({ ...newTicket, title: e.target.value })
-            }
-            required
-          />
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <label className="block text-gray-700 text-sm font-bold">
-                Description
-              </label>
-              <div className="space-x-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowMarkdownTips(!showMarkdownTips)}
-                >
-                  {showMarkdownTips ? 'Hide Formatting Help' : 'Formatting Help'}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowPreview(!showPreview)}
-                >
-                  {showPreview ? 'Edit' : 'Preview'}
-                </Button>
-              </div>
+      {closedTickets.length > 0 && (
+        <div className="mt-8">
+          <Button
+            variant="outline"
+            className="mb-2 w-full flex justify-between items-center"
+            onClick={() => setShowClosedTickets(!showClosedTickets)}
+          >
+            <span>Closed Tickets ({closedTickets.length})</span>
+            {showClosedTickets ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </Button>
+          
+          {showClosedTickets && (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {columns.map((column) => (
+                      <TableHead key={column.accessorKey}>
+                        {column.header}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {closedTickets.map((ticket) => (
+                    <TableRow
+                      key={ticket.id}
+                      onClick={() => handleTicketClick(ticket)}
+                      className="cursor-pointer"
+                    >
+                      {columns.map((column) => (
+                        <TableCell key={`${ticket.id}-${column.accessorKey}`}>
+                          {column.cell({ row: { original: ticket } })}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
-            
-            {showMarkdownTips && (
-              <div className="p-4 bg-gray-50 rounded-lg text-sm">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {MARKDOWN_TIPS}
-                </ReactMarkdown>
-              </div>
-            )}
+          )}
+        </div>
+      )}
 
-            {showPreview ? (
-              <div className="min-h-[200px] p-4 bg-gray-50 rounded-lg prose prose-sm max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {newTicket.description || '*No content yet*'}
-                </ReactMarkdown>
-              </div>
-            ) : (
-              <textarea
-                value={newTicket.description}
-                onChange={(e) =>
-                  setNewTicket({ ...newTicket, description: e.target.value })
-                }
-                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline min-h-[200px]"
-                placeholder="Describe your issue... (Markdown supported)"
+      {/* New Ticket Dialog */}
+      <Dialog open={isNewTicketModalOpen} onOpenChange={setIsNewTicketModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Support Ticket</DialogTitle>
+            <DialogDescription>
+              Fill out the form below to create a new support ticket. We'll get back to you as soon as possible.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="title">Title</Label>
+              <Input
+                id="title"
+                value={newTicket.title}
+                onChange={(e) => setNewTicket({ ...newTicket, title: e.target.value })}
+                placeholder="Brief description of your issue"
               />
-            )}
+            </div>
+            <div>
+              <Label htmlFor="description">Description</Label>
+              <Textarea
+                id="description"
+                value={newTicket.description}
+                onChange={(e) => setNewTicket({ ...newTicket, description: e.target.value })}
+                placeholder="Detailed description of your issue"
+                rows={4}
+              />
+            </div>
+            <div>
+              <Label htmlFor="priority">Priority</Label>
+              <Select
+                value={newTicket.priority}
+                onValueChange={(value) => setNewTicket({ ...newTicket, priority: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select priority" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <div className="flex justify-end space-x-2">
-            <Button
-              variant="secondary"
-              onClick={() => setIsNewTicketModalOpen(false)}
-            >
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsNewTicketModalOpen(false)}>
               Cancel
             </Button>
-            <Button
-              variant="primary"
-              onClick={handleCreateTicket}
-              disabled={!newTicket.title || !newTicket.description}
-            >
+            <Button onClick={handleCreateTicket}>
               Create Ticket
             </Button>
-          </div>
-        </div>
-      </Modal>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Ticket Details Modal */}
-      <Modal
-        isOpen={isTicketDetailsModalOpen}
-        onClose={() => {
-          setIsTicketDetailsModalOpen(false);
-          setSelectedTicket(null);
-          setTicketComments([]);
-          setShowPreview(false);
-        }}
-        title={selectedTicket?.title || 'Ticket Details'}
-      >
-        {selectedTicket && (
-          <div className="space-y-6">
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-sm font-medium text-gray-500">Status</h3>
-                <p className="mt-1">{selectedTicket.status}</p>
-              </div>
-              <div>
-                <h3 className="text-sm font-medium text-gray-500">Description</h3>
-                <div className="mt-1 prose prose-sm max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {selectedTicket.description}
-                  </ReactMarkdown>
+      {/* Ticket Details Dialog */}
+      <Dialog open={selectedTicket !== null} onOpenChange={() => setSelectedTicket(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Ticket Details</DialogTitle>
+          </DialogHeader>
+          {selectedTicket && (
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <div className="flex justify-between items-start">
+                  <h3 className="text-lg font-semibold">{selectedTicket.title}</h3>
+                  <div className="flex items-center gap-2">
+                    {selectedTicket.status === 'resolved' && !selectedTicket.feedback_rating && (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => setShowFeedbackDialog(true)}
+                      >
+                        Give Feedback
+                      </Button>
+                    )}
+                    {selectedTicket.status !== 'resolved' && selectedTicket.status !== 'closed' && (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={handleResolveTicket}
+                      >
+                        Mark as Resolved
+                      </Button>
+                    )}
+                    <Badge variant={getStatusVariant(selectedTicket.status)}>
+                      {selectedTicket.status}
+                    </Badge>
+                  </div>
                 </div>
-              </div>
-              <div>
-                <h3 className="text-sm font-medium text-gray-500">Created</h3>
-                <p className="mt-1">
-                  {new Date(selectedTicket.created_at).toLocaleString()}
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                  {selectedTicket.description}
                 </p>
               </div>
-              {selectedTicket.assigned_to && (
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500">Assigned To</h3>
-                  <p className="mt-1">
-                    {selectedTicket.assigned_to.full_name || selectedTicket.assigned_to.email}
-                  </p>
-                </div>
-              )}
-            </div>
 
-            <div className="space-y-4">
-              <h3 className="font-medium text-gray-900">Comments</h3>
               <div className="space-y-4">
-                {ticketComments.length === 0 ? (
-                  <p className="text-gray-500 text-center">No comments yet</p>
-                ) : (
-                  <>
-                    {(expandedComments ? ticketComments : ticketComments.slice(-INITIAL_COMMENTS_TO_SHOW)).map((comment) => (
-                      <div key={comment.id} className="bg-gray-50 p-4 rounded-lg">
-                        <div className="flex justify-between items-start">
-                          <span className="text-sm font-medium">
-                            {comment.user?.id === user.id ? (
-                              comment.user?.full_name || comment.user?.email
-                            ) : (
-                              <span className="text-blue-700">
-                                (Support Agent) {comment.user?.full_name || comment.user?.email || 'Support Team'}
-                              </span>
-                            )}
-                          </span>
-                          <span className="text-xs text-gray-500">
+                <div>
+                  <h4 className="font-medium mb-2">Comments</h4>
+                  <div className="space-y-4">
+                    {ticketComments.map((comment) => (
+                      <div key={comment.id} className="p-4 rounded-lg bg-muted">
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="font-medium">{comment.user?.full_name || 'Unknown'}</span>
+                          <span className="text-sm text-muted-foreground">
                             {new Date(comment.created_at).toLocaleString()}
                           </span>
                         </div>
-                        <div className="mt-1 prose prose-sm max-w-none">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {comment.content}
-                          </ReactMarkdown>
-                        </div>
+                        <p className="text-sm whitespace-pre-wrap">{comment.content}</p>
                       </div>
                     ))}
-                    {ticketComments.length > INITIAL_COMMENTS_TO_SHOW && (
-                      <div className="text-center">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => setExpandedComments(!expandedComments)}
-                        >
-                          {expandedComments ? 'Show Less' : `Show ${ticketComments.length - INITIAL_COMMENTS_TO_SHOW} More Comments`}
-                        </Button>
-                      </div>
+                    {ticketComments.length === 0 && (
+                      <p className="text-sm text-muted-foreground">No comments yet</p>
                     )}
-                  </>
-                )}
-
-                <div className="mt-4 space-y-3">
-                  <div className="flex justify-between items-center">
-                    <h4 className="text-sm font-medium text-gray-900">Add Comment</h4>
-                    <div className="space-x-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setShowMarkdownTips(!showMarkdownTips)}
-                      >
-                        {showMarkdownTips ? 'Hide Formatting Help' : 'Formatting Help'}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setShowPreview(!showPreview)}
-                      >
-                        {showPreview ? 'Edit' : 'Preview'}
-                      </Button>
-                    </div>
-                  </div>
-
-                  {showMarkdownTips && (
-                    <div className="p-4 bg-gray-50 rounded-lg text-sm">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {MARKDOWN_TIPS}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-
-                  {showPreview ? (
-                    <div className="min-h-[100px] p-4 bg-gray-50 rounded-lg prose prose-sm max-w-none">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {newComment || '*No content yet*'}
-                      </ReactMarkdown>
-                    </div>
-                  ) : (
-                    <textarea
-                      value={newComment}
-                      onChange={(e) => setNewComment(e.target.value)}
-                      placeholder="Write your comment... (Markdown supported)"
-                      className="w-full min-h-[100px] p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  )}
-                  <div className="flex justify-end">
-                    <Button
-                      variant="primary"
-                      onClick={handleCreateComment}
-                      disabled={!newComment.trim() || isSubmittingComment}
-                    >
-                      {isSubmittingComment ? 'Sending...' : 'Add Comment'}
-                    </Button>
                   </div>
                 </div>
+
+                <div>
+                  <Label htmlFor="newComment">Add Comment</Label>
+                  <Textarea
+                    id="newComment"
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    placeholder="Type your comment here..."
+                    rows={3}
+                  />
+                </div>
               </div>
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setSelectedTicket(null)}>
+                  Close
+                </Button>
+                <Button onClick={handleCreateComment} disabled={!newComment.trim()}>
+                  Add Comment
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Feedback Dialog */}
+      <Dialog open={showFeedbackDialog} onOpenChange={setShowFeedbackDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Provide Feedback</DialogTitle>
+            <DialogDescription>
+              Please rate your support experience and provide any additional comments.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="rating">Rating</Label>
+              <Select
+                value={feedback.rating}
+                onValueChange={(value) => setFeedback({ ...feedback, rating: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select rating" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">1 - Poor</SelectItem>
+                  <SelectItem value="2">2 - Fair</SelectItem>
+                  <SelectItem value="3">3 - Good</SelectItem>
+                  <SelectItem value="4">4 - Very Good</SelectItem>
+                  <SelectItem value="5">5 - Excellent</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="feedbackComment">Comments (Optional)</Label>
+              <Textarea
+                id="feedbackComment"
+                value={feedback.comment}
+                onChange={(e) => setFeedback({ ...feedback, comment: e.target.value })}
+                placeholder="Share your experience with our support..."
+                rows={3}
+              />
             </div>
           </div>
-        )}
-      </Modal>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowFeedbackDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmitFeedback}>
+              Submit Feedback
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

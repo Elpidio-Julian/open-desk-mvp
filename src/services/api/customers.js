@@ -140,5 +140,21 @@ export const customersService = {
         is_internal: false // Customers can't create internal comments
       }]);
     return { data, error };
+  },
+
+  updateTicket: async (ticketId, updates) => {
+    try {
+      const { data, error } = await supabase
+        .from('tickets')
+        .update(updates)
+        .match({ id: ticketId })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { data, error: null };
+    } catch (error) {
+      return { data: null, error };
+    }
   }
 }; 
