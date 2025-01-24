@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { routingService } from './routing';
 
 export const customersService = {
   getCustomerDetails: async (customerId) => {
@@ -107,13 +108,26 @@ export const customersService = {
   },
 
   createTicket: async (ticketData) => {
-    const { data, error } = await supabase
+    const { data: ticket, error } = await supabase
       .from('tickets')
       .insert([{
         ...ticketData,
         status: 'open'
-      }]);
-    return { data, error };
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Attempt auto-assignment
+    try {
+      await routingService.autoAssignTicket(ticket.id);
+    } catch (routingError) {
+      console.error('Auto-assignment failed:', routingError);
+      // Continue even if auto-assignment fails
+    }
+
+    return ticket;
   },
 
   addComment: async (ticketId, userId, content) => {

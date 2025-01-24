@@ -1,15 +1,26 @@
 import { supabase } from '../supabase';
+import { routingService } from './routing';
 
 export const ticketsService = {
   // Create operations
   create: async (ticketData) => {
-    const { data, error } = await supabase
+    const { data: ticket, error } = await supabase
       .from('tickets')
-      .insert([{
-        ...ticketData,
-        status: 'open'
-      }]);
-    return { data, error };
+      .insert([ticketData])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Attempt auto-assignment
+    try {
+      await routingService.autoAssignTicket(ticket.id);
+    } catch (routingError) {
+      console.error('Auto-assignment failed:', routingError);
+      // Continue even if auto-assignment fails
+    }
+
+    return ticket;
   },
 
   // Read operations
@@ -95,11 +106,28 @@ export const ticketsService = {
 
   // Update operations
   updateTicket: async (ticketId, updates) => {
+    // If status is changing to 'open' and ticket is unassigned, try auto-assignment
+    if (updates.status === 'open' && !updates.assigned_to) {
+      try {
+        const agent = await routingService.autoAssignTicket(ticketId);
+        if (agent) {
+          updates.assigned_to = agent.id;
+        }
+      } catch (routingError) {
+        console.error('Auto-assignment failed:', routingError);
+        // Continue with update even if auto-assignment fails
+      }
+    }
+
     const { data, error } = await supabase
       .from('tickets')
       .update(updates)
-      .eq('id', ticketId);
-    return { data, error };
+      .eq('id', ticketId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
   },
 
   // Bulk operations
@@ -143,4 +171,42 @@ export const ticketsService = {
       .order('created_at', { ascending: true });
     return { data, error };
   }
-}; 
+};
+
+/**
+ * Bulk update tickets
+ */
+async function bulkUpdateTickets(ticketIds, updates) {
+  // For each unassigned ticket being set to 'open', try auto-assignment
+  if (updates.status === 'open' && !updates.assigned_to) {
+    await Promise.all(ticketIds.map(async (ticketId) => {
+      try {
+        const agent = await routingService.autoAssignTicket(ticketId);
+        if (agent) {
+          // Update individual ticket with assignment
+          await supabase
+            .from('tickets')
+            .update({ ...updates, assigned_to: agent.id })
+            .eq('id', ticketId);
+          return;
+        }
+      } catch (routingError) {
+        console.error(`Auto-assignment failed for ticket ${ticketId}:`, routingError);
+      }
+      // If auto-assignment fails, update without assignment
+      await supabase
+        .from('tickets')
+        .update(updates)
+        .eq('id', ticketId);
+    }));
+    return;
+  }
+
+  // For other updates, perform bulk update
+  const { error } = await supabase
+    .from('tickets')
+    .update(updates)
+    .in('id', ticketIds);
+
+  if (error) throw error;
+} 

@@ -4,6 +4,7 @@ import { Card } from '../ui/card';
 import { Button } from '../ui/button';
 import TeamManagement from './TeamManagement';
 import AdminAnalytics from './AdminAnalytics';
+import RoutingSettings from './RoutingSettings';
 
 const AdminDashboard = ({ 
   isWidget = false, 
@@ -48,12 +49,7 @@ const AdminDashboard = ({
           </TabsContent>
 
           <TabsContent value="routing" className="space-y-4">
-            <Card>
-              <div className="p-4">
-                <h3 className="text-xl font-semibold mb-4">Routing Rules</h3>
-                <div className="text-muted-foreground">Routing rules configuration coming soon...</div>
-              </div>
-            </Card>
+            <RoutingSettings />
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-4">
