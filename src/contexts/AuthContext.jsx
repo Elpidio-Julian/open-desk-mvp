@@ -53,6 +53,15 @@ export const AuthProvider = ({ children }) => {
     try {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
+      
+      // Clear local state
+      setUser(null);
+      
+      // Clear local storage
+      localStorage.clear();
+      
+      // Force reload to clear any remaining state
+      window.location.href = '/login';
     } catch (error) {
       console.error('Error signing out:', error.message);
     }
