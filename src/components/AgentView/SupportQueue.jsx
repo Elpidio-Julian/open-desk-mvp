@@ -2,12 +2,38 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import Button from '../SharedComponents/Button/Button';
-import Table from '../SharedComponents/Table/Table';
-import Modal from '../SharedComponents/Modal/Modal';
-import Input from '../SharedComponents/Form/Input';
-import Alert from '../SharedComponents/Notification/Alert';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Loader2, ArrowUpDown } from 'lucide-react';
 import { ticketsService } from '../../services/api/tickets';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 const MARKDOWN_TIPS = `
 ### Markdown Tips:
@@ -31,9 +57,15 @@ const TICKET_FILTERS = {
   PRIORITY: ['all', 'low', 'medium', 'high', 'urgent'],
 };
 
-const SupportQueue = ({ 
-  isWidget = false, 
-  maxHeight, 
+const TICKET_TABS = {
+  ACTIVE: 'active',
+  RESOLVED: 'resolved',
+  CLOSED: 'closed'
+};
+
+const SupportQueue = ({
+  isWidget = false,
+  maxHeight,
   onClose,
   defaultView = TICKET_VIEWS.ALL,
   hideViewSelector = false
@@ -59,6 +91,9 @@ const SupportQueue = ({
   const [showPreview, setShowPreview] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [expandedComments, setExpandedComments] = useState(false);
+  const [sorting, setSorting] = useState({ field: null, direction: 'asc' });
+  const [currentTab, setCurrentTab] = useState(TICKET_TABS.ACTIVE);
+  
   const INITIAL_COMMENTS_TO_SHOW = 3;
 
   useEffect(() => {
@@ -81,6 +116,82 @@ const SupportQueue = ({
       setAlert({ type: 'error', message: error.message });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleSort = (field) => {
+    setSorting(prev => ({
+      field,
+      direction: prev.field === field && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const getFilteredTickets = () => {
+    let filtered = [...tickets];
+
+    // First apply tab filtering
+    if (currentTab === TICKET_TABS.ACTIVE) {
+      filtered = filtered.filter(ticket => !['resolved', 'closed'].includes(ticket.status));
+    } else if (currentTab === TICKET_TABS.RESOLVED) {
+      filtered = filtered.filter(ticket => ticket.status === 'resolved');
+    } else if (currentTab === TICKET_TABS.CLOSED) {
+      filtered = filtered.filter(ticket => ticket.status === 'closed');
+    }
+
+    // Then apply status filter if it's not 'all'
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(ticket => ticket.status === statusFilter);
+    }
+
+    // Apply priority filter if it's not 'all'
+    if (priorityFilter !== 'all') {
+      filtered = filtered.filter(ticket => ticket.priority === priorityFilter);
+    }
+
+    // Apply search filter if there's a search query
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(ticket => 
+        ticket.title.toLowerCase().includes(query) ||
+        ticket.created_by?.full_name?.toLowerCase().includes(query) ||
+        ticket.created_by?.email?.toLowerCase().includes(query)
+      );
+    }
+
+    return filtered;
+  };
+
+  const getSortedTickets = () => {
+    if (!sorting.field) return getFilteredTickets();
+
+    return [...getFilteredTickets()].sort((a, b) => {
+      let aValue = a[sorting.field];
+      let bValue = b[sorting.field];
+
+      // Handle nested fields
+      if (sorting.field === 'created_by') {
+        aValue = a.created_by?.full_name || a.created_by?.email;
+        bValue = b.created_by?.full_name || b.created_by?.email;
+      } else if (sorting.field === 'assigned_to') {
+        aValue = a.assigned_to?.full_name || '';
+        bValue = b.assigned_to?.full_name || '';
+      }
+
+      if (aValue === bValue) return 0;
+      if (sorting.direction === 'asc') {
+        return aValue > bValue ? 1 : -1;
+      } else {
+        return aValue < bValue ? 1 : -1;
+      }
+    });
+  };
+
+  const handleSelectAll = (checked) => {
+    if (checked) {
+      const allIds = tickets.map(ticket => ticket.id);
+      setSelectedTickets(new Set(allIds));
+    } else {
+      setSelectedTickets(new Set());
     }
   };
 
@@ -131,13 +242,28 @@ const SupportQueue = ({
   };
 
   const handleAddComment = async (ticketId, content, isInternal) => {
+    setIsSubmittingComment(true);
     try {
       const { error } = await ticketsService.addComment(ticketId, user.id, content, isInternal);
       if (error) throw error;
+      
+      // Clear the comment field and show success message
+      setNewComment('');
+      setAlert({ 
+        type: 'success', 
+        message: `${isInternal ? 'Internal note' : 'Response'} sent successfully` 
+      });
+      
+      // Refresh ticket data
+      await fetchTicketDetails(ticketId);
       await fetchTickets();
-      setAlert({ type: 'success', message: 'Comment added successfully' });
     } catch (error) {
-      setAlert({ type: 'error', message: error.message });
+      setAlert({ 
+        type: 'error', 
+        message: `Failed to send ${isInternal ? 'internal note' : 'response'}: ${error.message}` 
+      });
+    } finally {
+      setIsSubmittingComment(false);
     }
   };
 
@@ -196,115 +322,59 @@ const SupportQueue = ({
     }
   };
 
-  const columns = [
-    {
-      header: '',
-      field: 'select',
-      render: (row) => (
-        <input
-          type="checkbox"
-          checked={selectedTickets.has(row.id)}
-          onChange={(e) => {
-            const newSelected = new Set(selectedTickets);
-            if (e.target.checked) {
-              newSelected.add(row.id);
-            } else {
-              newSelected.delete(row.id);
-            }
-            setSelectedTickets(newSelected);
-          }}
-          onClick={(e) => e.stopPropagation()}
-          className="h-4 w-4 rounded border-gray-300"
-        />
-      ),
-    },
-    { 
-      header: 'Priority',
-      field: 'priority',
-      render: (row) => (
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-          ${row.priority === 'urgent' ? 'bg-red-100 text-red-800' :
-            row.priority === 'high' ? 'bg-orange-100 text-orange-800' :
-            row.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-            'bg-green-100 text-green-800'}`
-        }>
-          {row.priority}
-        </span>
-      ),
-    },
-    { header: 'Title', field: 'title' },
-    { 
-      header: 'Customer',
-      field: 'created_by',
-      render: (row) => row.created_by?.full_name || row.created_by?.email,
-    },
-    { 
-      header: 'Assigned To',
-      field: 'assigned_to',
-      render: (row) => row.assigned_to?.full_name || 'Unassigned',
-    },
-    { header: 'Status', field: 'status' },
-    {
-      header: 'Created',
-      field: 'created_at',
-      render: (row) => new Date(row.created_at).toLocaleString(),
-    },
-    {
-      header: 'Comments',
-      field: 'comments',
-      render: (row) => row.comments?.[0]?.count || 0,
-    },
-  ];
-
   const containerStyle = {
     maxHeight: maxHeight || 'auto',
     overflow: 'auto',
     ...(isWidget && {
-      border: '1px solid #e5e7eb',
-      borderRadius: '0.5rem',
-      boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
+      border: '1px solid hsl(var(--border))',
+      borderRadius: 'calc(var(--radius) * 1.5)',
     }),
   };
 
   return (
     <div className="px-4 py-8" style={containerStyle}>
       {alert && (
-        <div className="mb-4">
-          <Alert
-            type={alert.type}
-            message={alert.message}
-            onClose={() => setAlert(null)}
-          />
-        </div>
+        <Alert variant={alert.type === 'error' ? 'destructive' : 'default'} className="mb-4">
+          <AlertDescription>{alert.message}</AlertDescription>
+        </Alert>
       )}
 
       <div className="mb-6 space-y-4">
-        <div className="flex items-center space-x-4">
-          <h1 className="text-2xl font-bold text-gray-800">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">
             {currentView === TICKET_VIEWS.MY_TICKETS ? 'My Tickets' : 'Support Queue'}
           </h1>
-          <div className="flex-1" />
-          <Input
-            type="search"
-            placeholder="Search tickets..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="max-w-xs"
-          />
-          {isWidget && onClose && (
-            <Button variant="secondary" onClick={onClose}>
-              Close
-            </Button>
-          )}
+          <div className="flex items-center gap-4">
+            <Input
+              type="search"
+              placeholder="Search tickets..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="max-w-xs"
+            />
+            {isWidget && onClose && (
+              <Button variant="outline" onClick={onClose}>
+                Close
+              </Button>
+            )}
+          </div>
         </div>
+
+        <Tabs value={currentTab} onValueChange={setCurrentTab} className="w-full">
+          <TabsList>
+            <TabsTrigger value={TICKET_TABS.ACTIVE}>Active Tickets</TabsTrigger>
+            <TabsTrigger value={TICKET_TABS.RESOLVED}>Resolved</TabsTrigger>
+            <TabsTrigger value={TICKET_TABS.CLOSED}>Closed</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {!hideViewSelector && (
           <div className="flex flex-wrap gap-4">
-            <div className="flex rounded-lg shadow-sm">
+            <div className="flex">
               {Object.entries(TICKET_VIEWS).map(([key, value]) => (
                 <Button
                   key={key}
-                  variant={currentView === value ? 'primary' : 'secondary'}
+                  variant={currentView === value ? 'default' : 'outline'}
                   onClick={() => setCurrentView(value)}
                   className="first:rounded-l-lg last:rounded-r-lg rounded-none"
                 >
@@ -313,337 +383,493 @@ const SupportQueue = ({
               ))}
             </div>
 
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            >
-              {TICKET_FILTERS.STATUS.map((status) => (
-                <option key={status} value={status}>
-                  {status === 'all' ? 'All Statuses' : status.replace('_', ' ')}
-                </option>
-              ))}
-            </select>
+            {currentTab === TICKET_TABS.ACTIVE && (
+              <>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TICKET_FILTERS.STATUS.filter(status => !['resolved', 'closed'].includes(status)).map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {status === 'all' ? 'All Statuses' : status.replace('_', ' ')}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
 
-            <select
-              value={priorityFilter}
-              onChange={(e) => setPriorityFilter(e.target.value)}
-              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            >
-              {TICKET_FILTERS.PRIORITY.map((priority) => (
-                <option key={priority} value={priority}>
-                  {priority === 'all' ? 'All Priorities' : priority}
-                </option>
-              ))}
-            </select>
+                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Filter by priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TICKET_FILTERS.PRIORITY.map((priority) => (
+                      <SelectItem key={priority} value={priority}>
+                        {priority === 'all' ? 'All Priorities' : priority}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </>
+            )}
           </div>
         )}
 
-        {!hideViewSelector && selectedTickets.size > 0 && (
-          <div className="flex items-center space-x-4 bg-gray-50 p-4 rounded-lg">
-            <span className="text-sm text-gray-600">
+        {selectedTickets.size > 0 && (
+          <div className="flex items-center gap-4 bg-muted p-4 rounded-lg">
+            <span className="text-sm text-muted-foreground">
               {selectedTickets.size} tickets selected
             </span>
-            <Button
-              variant="secondary"
-              onClick={handleBulkAssign}
-            >
-              Assign to Me
-            </Button>
-            <select
-              onChange={(e) => handleBulkStatusUpdate(e.target.value)}
-              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            >
-              <option value="">Update Status</option>
-              {TICKET_FILTERS.STATUS.filter(s => s !== 'all').map((status) => (
-                <option key={status} value={status}>
-                  {status.replace('_', ' ')}
-                </option>
-              ))}
-            </select>
+            {currentTab === TICKET_TABS.ACTIVE && (
+              <Button variant="secondary" onClick={handleBulkAssign}>
+                Assign to Me
+              </Button>
+            )}
+            <Select onValueChange={handleBulkStatusUpdate}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Update Status" />
+              </SelectTrigger>
+              <SelectContent>
+                {currentTab === TICKET_TABS.ACTIVE && 
+                  TICKET_FILTERS.STATUS
+                    .filter(s => !['all', 'resolved', 'closed'].includes(s))
+                    .map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {status.replace('_', ' ')}
+                      </SelectItem>
+                    ))
+                }
+                {currentTab === TICKET_TABS.RESOLVED && (
+                  <>
+                    <SelectItem value="open">Reopen</SelectItem>
+                    <SelectItem value="closed">Close</SelectItem>
+                  </>
+                )}
+                {currentTab === TICKET_TABS.CLOSED && (
+                  <SelectItem value="open">Reopen</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
           </div>
         )}
       </div>
 
       {isLoading ? (
-        <div className="text-center py-8">Loading...</div>
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
       ) : (
-        <Table
-          columns={columns}
-          data={tickets}
-          onRowClick={handleTicketClick}
-        />
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[50px]">
+                  <Checkbox
+                    checked={selectedTickets.size === tickets.length}
+                    onCheckedChange={handleSelectAll}
+                  />
+                </TableHead>
+                <TableHead>
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort('priority')}
+                    className="flex items-center gap-1"
+                  >
+                    Priority
+                    <ArrowUpDown className="h-4 w-4" />
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort('title')}
+                    className="flex items-center gap-1"
+                  >
+                    Title
+                    <ArrowUpDown className="h-4 w-4" />
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort('created_by')}
+                    className="flex items-center gap-1"
+                  >
+                    Customer
+                    <ArrowUpDown className="h-4 w-4" />
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort('assigned_to')}
+                    className="flex items-center gap-1"
+                  >
+                    Assigned To
+                    <ArrowUpDown className="h-4 w-4" />
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort('status')}
+                    className="flex items-center gap-1"
+                  >
+                    Status
+                    <ArrowUpDown className="h-4 w-4" />
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort('created_at')}
+                    className="flex items-center gap-1"
+                  >
+                    Created
+                    <ArrowUpDown className="h-4 w-4" />
+                  </Button>
+                </TableHead>
+                <TableHead>Comments</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {getSortedTickets().map((ticket) => (
+                <TableRow
+                  key={ticket.id}
+                  className="cursor-pointer"
+                  onClick={() => handleTicketClick(ticket)}
+                >
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      checked={selectedTickets.has(ticket.id)}
+                      onCheckedChange={(checked) => {
+                        const newSelected = new Set(selectedTickets);
+                        if (checked) {
+                          newSelected.add(ticket.id);
+                        } else {
+                          newSelected.delete(ticket.id);
+                        }
+                        setSelectedTickets(newSelected);
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        ticket.priority === 'urgent' ? 'destructive' :
+                        ticket.priority === 'high' ? 'orange' :
+                        ticket.priority === 'medium' ? 'yellow' :
+                        'green'
+                      }
+                    >
+                      {ticket.priority}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{ticket.title}</TableCell>
+                  <TableCell>
+                    {ticket.created_by?.full_name || ticket.created_by?.email}
+                  </TableCell>
+                  <TableCell>
+                    {ticket.assigned_to?.full_name || 'Unassigned'}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">
+                      {ticket.status.replace('_', ' ')}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {new Date(ticket.created_at).toLocaleString()}
+                  </TableCell>
+                  <TableCell>
+                    {ticket.comments?.[0]?.count || 0}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
 
       {selectedTicket && ticketDetails && (
-        <Modal
-          isOpen={isDetailsModalOpen}
-          onClose={() => {
-            setIsDetailsModalOpen(false);
-            setSelectedTicket(null);
-            setTicketDetails(null);
-            setTicketComments([]);
-            setShowPreview(false);
-            setShowHistory(false);
-          }}
-          title={ticketDetails?.title || 'Ticket Details'}
-        >
-          <div className="space-y-6">
-            <div className="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
-              <div className="space-y-1">
-                <h3 className="text-sm font-medium text-gray-900">Status</h3>
-                <select
-                  value={ticketDetails.status}
-                  onChange={(e) => handleUpdateTicket({ status: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 py-2 pl-3 pr-10 text-base focus:border-blue-500 focus:outline-none focus:ring-blue-500 sm:text-sm"
-                >
-                  {TICKET_FILTERS.STATUS.filter(s => s !== 'all').map((status) => (
-                    <option key={status} value={status}>
-                      {status.replace('_', ' ')}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-sm font-medium text-gray-900">Priority</h3>
-                <select
-                  value={ticketDetails.priority}
-                  onChange={(e) => handleUpdateTicket({ priority: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 py-2 pl-3 pr-10 text-base focus:border-blue-500 focus:outline-none focus:ring-blue-500 sm:text-sm"
-                >
-                  {TICKET_FILTERS.PRIORITY.filter(p => p !== 'all').map((priority) => (
-                    <option key={priority} value={priority}>
-                      {priority}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-sm font-medium text-gray-900">Assignment</h3>
-                <Button
-                  variant={ticketDetails.assigned_to?.id === user.id ? "secondary" : "primary"}
-                  onClick={() => handleUpdateTicket({ 
-                    assigned_to: ticketDetails.assigned_to?.id === user.id ? null : user.id 
-                  })}
-                >
-                  {ticketDetails.assigned_to?.id === user.id ? "Unassign" : "Assign to Me"}
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500">Status</h3>
-                  <p className="mt-1">{ticketDetails.status}</p>
-                </div>
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500">Priority</h3>
-                  <p className="mt-1">{ticketDetails.priority}</p>
-                </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowHistory(!showHistory)}
-                >
-                  {showHistory ? 'Hide Customer History' : 'Show Customer History'}
-                </Button>
-              </div>
-
-              {showHistory && customerHistory.length > 0 && (
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h3 className="text-sm font-medium text-gray-700 mb-3">Customer History</h3>
-                  <div className="space-y-3">
-                    {customerHistory.map((ticket) => (
-                      <div
-                        key={ticket.id}
-                        className={`p-3 rounded ${
-                          ticket.id === ticketDetails.id ? 'bg-blue-50 border border-blue-200' : 'bg-white'
-                        }`}
+        <Dialog open={isDetailsModalOpen} onOpenChange={() => {
+          setIsDetailsModalOpen(false);
+          setSelectedTicket(null);
+          setTicketDetails(null);
+          setTicketComments([]);
+          setShowPreview(false);
+          setShowHistory(false);
+        }}>
+          <DialogContent className="max-w-4xl">
+            <DialogHeader>
+              <DialogTitle>{ticketDetails?.title || 'Ticket Details'}</DialogTitle>
+              <DialogDescription>
+                Ticket #{ticketDetails.id}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-8">
+                <div className="space-y-4">
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right">Status</Label>
+                    <div className="col-span-3">
+                      <Select
+                        value={ticketDetails.status}
+                        onValueChange={(value) => handleUpdateTicket({ status: value })}
                       >
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <h4 className="text-sm font-medium">{ticket.title}</h4>
-                            <div className="flex space-x-4 mt-1 text-xs text-gray-500">
-                              <span>Status: {ticket.status}</span>
-                              <span>Priority: {ticket.priority}</span>
-                              <span>Created: {new Date(ticket.created_at).toLocaleDateString()}</span>
-                              {ticket.resolved_at && (
-                                <span>Resolved: {new Date(ticket.resolved_at).toLocaleDateString()}</span>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TICKET_FILTERS.STATUS.filter(s => s !== 'all').map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {status.replace('_', ' ')}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right">Priority</Label>
+                    <div className="col-span-3">
+                      <Select
+                        value={ticketDetails.priority}
+                        onValueChange={(value) => handleUpdateTicket({ priority: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select priority" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TICKET_FILTERS.PRIORITY.filter(p => p !== 'all').map((priority) => (
+                            <SelectItem key={priority} value={priority}>
+                              {priority}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right">Assignment</Label>
+                    <div className="col-span-3">
+                      <Button
+                        variant={ticketDetails.assigned_to?.id === user.id ? "secondary" : "primary"}
+                        onClick={() => handleUpdateTicket({ 
+                          assigned_to: ticketDetails.assigned_to?.id === user.id ? null : user.id 
+                        })}
+                      >
+                        {ticketDetails.assigned_to?.id === user.id ? "Unassign" : "Assign to Me"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right">Customer</Label>
+                    <div className="col-span-3">
+                      <p className="text-sm">{ticketDetails.created_by?.full_name || ticketDetails.created_by?.email}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right">Created</Label>
+                    <div className="col-span-3">
+                      <p className="text-sm">{new Date(ticketDetails.created_at).toLocaleString()}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 items-start gap-4">
+                    <Label className="text-right pt-2">Description</Label>
+                    <div className="col-span-3 prose prose-sm max-w-none bg-muted p-3 rounded-md">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {ticketDetails.description}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-lg font-semibold">Comments & Notes</h3>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowHistory(!showHistory)}
+                    >
+                      {showHistory ? 'Hide History' : 'Show History'}
+                    </Button>
+                  </div>
+
+                  {showHistory && customerHistory.length > 0 && (
+                    <div className="border rounded-md p-4 bg-muted/50">
+                      <h4 className="font-medium mb-3">Customer History</h4>
+                      <div className="space-y-3 max-h-[200px] overflow-y-auto pr-2">
+                        {customerHistory.map((ticket) => (
+                          <div
+                            key={ticket.id}
+                            className={`p-3 rounded-md ${
+                              ticket.id === ticketDetails.id ? 'bg-blue-50 border border-blue-200' : 'bg-background'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div className="flex-1">
+                                <h4 className="text-sm font-medium">{ticket.title}</h4>
+                                <div className="flex gap-4 mt-1 text-xs text-muted-foreground">
+                                  <span>Status: {ticket.status}</span>
+                                  <span>Priority: {ticket.priority}</span>
+                                  <span>Created: {new Date(ticket.created_at).toLocaleDateString()}</span>
+                                  {ticket.resolved_at && (
+                                    <span>Resolved: {new Date(ticket.resolved_at).toLocaleDateString()}</span>
+                                  )}
+                                </div>
+                              </div>
+                              {ticket.id !== ticketDetails.id && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleTicketClick({ id: ticket.id });
+                                  }}
+                                >
+                                  View
+                                </Button>
                               )}
                             </div>
                           </div>
-                          {ticket.id !== ticketDetails.id && (
-                            <Button
-                              variant="secondary"
-                              size="xs"
-                              onClick={() => handleTicketClick({ id: ticket.id })}
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    {ticketComments.length === 0 ? (
+                      <p className="text-center text-muted-foreground py-4">No comments yet</p>
+                    ) : (
+                      <>
+                        <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                          {(expandedComments ? ticketComments : ticketComments.slice(-INITIAL_COMMENTS_TO_SHOW)).map((comment) => (
+                            <div
+                              key={comment.id}
+                              className={`p-4 rounded-lg ${
+                                comment.is_internal ? 'bg-yellow-50' : 'bg-muted'
+                              }`}
                             >
-                              View
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <span className="text-sm font-medium">
+                                    {comment.user_id === ticketDetails.created_by.id ? (
+                                      comment.user?.full_name || comment.user?.email
+                                    ) : (
+                                      <span className="text-primary">
+                                        (Support Agent) {comment.user?.full_name || comment.user?.email || 'Support Team'}
+                                      </span>
+                                    )}
+                                  </span>
+                                  {comment.is_internal && (
+                                    <Badge variant="warning" className="ml-2">
+                                      Internal Note
+                                    </Badge>
+                                  )}
+                                </div>
+                                <span className="text-xs text-muted-foreground">
+                                  {new Date(comment.created_at).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="mt-1 prose prose-sm max-w-none">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                  {comment.content}
+                                </ReactMarkdown>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {ticketComments.length > INITIAL_COMMENTS_TO_SHOW && (
+                          <div className="text-center">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setExpandedComments(!expandedComments)}
+                            >
+                              {expandedComments ? 'Show Less' : `Show ${ticketComments.length - INITIAL_COMMENTS_TO_SHOW} More Comments`}
                             </Button>
-                          )}
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-4">
+                          <h4 className="font-medium">Add Response</h4>
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              id="internal"
+                              checked={isInternalNote}
+                              onCheckedChange={setIsInternalNote}
+                            />
+                            <Label htmlFor="internal">Internal Note</Label>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowMarkdownTips(!showMarkdownTips)}
+                          >
+                            {showMarkdownTips ? 'Hide Formatting Help' : 'Formatting Help'}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowPreview(!showPreview)}
+                          >
+                            {showPreview ? 'Edit' : 'Preview'}
+                          </Button>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
-              <div>
-                <h3 className="text-sm font-medium text-gray-500">Description</h3>
-                <div className="mt-1 prose prose-sm max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {ticketDetails.description}
-                  </ReactMarkdown>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500">Created By</h3>
-                  <p className="mt-1">
-                    {ticketDetails.created_by?.full_name || ticketDetails.created_by?.email}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {new Date(ticketDetails.created_at).toLocaleString()}
-                  </p>
-                </div>
-                {ticketDetails.assigned_to && (
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-500">Assigned To</h3>
-                    <p className="mt-1">
-                      {ticketDetails.assigned_to?.full_name || ticketDetails.assigned_to?.email}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <h3 className="font-medium text-gray-900">Comments & Notes</h3>
-              <div className="space-y-4">
-                {ticketComments.length === 0 ? (
-                  <p className="text-gray-500 text-center">No comments yet</p>
-                ) : (
-                  <>
-                    {(expandedComments ? ticketComments : ticketComments.slice(-INITIAL_COMMENTS_TO_SHOW)).map((comment) => (
-                      <div
-                        key={comment.id}
-                        className={`p-4 rounded-lg ${
-                          comment.is_internal ? 'bg-yellow-50' : 'bg-gray-50'
-                        }`}
-                      >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <span className="text-sm font-medium">
-                              {comment.user_id === ticketDetails.created_by.id ? (
-                                comment.user?.full_name || comment.user?.email
-                              ) : (
-                                <span className="text-blue-700">
-                                  (Support Agent) {comment.user?.full_name || comment.user?.email || 'Support Team'}
-                                </span>
-                              )}
-                            </span>
-                            {comment.is_internal && (
-                              <span className="ml-2 text-xs bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded">
-                                Internal Note
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-xs text-gray-500">
-                            {new Date(comment.created_at).toLocaleString()}
-                          </span>
-                        </div>
-                        <div className="mt-1 prose prose-sm max-w-none">
+                      {showMarkdownTips && (
+                        <div className="p-4 bg-muted rounded-lg text-sm prose prose-sm max-w-none">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {comment.content}
+                            {MARKDOWN_TIPS}
                           </ReactMarkdown>
                         </div>
-                      </div>
-                    ))}
-                    {ticketComments.length > INITIAL_COMMENTS_TO_SHOW && (
-                      <div className="text-center">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => setExpandedComments(!expandedComments)}
-                        >
-                          {expandedComments ? 'Show Less' : `Show ${ticketComments.length - INITIAL_COMMENTS_TO_SHOW} More Comments`}
-                        </Button>
-                      </div>
-                    )}
-                  </>
-                )}
+                      )}
 
-                <div className="mt-4 space-y-3">
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center space-x-4">
-                      <h4 className="text-sm font-medium text-gray-900">Add Response</h4>
-                      <label className="flex items-center space-x-2">
-                        <input
-                          type="checkbox"
-                          checked={isInternalNote}
-                          onChange={(e) => setIsInternalNote(e.target.checked)}
-                          className="rounded text-blue-600"
+                      {showPreview ? (
+                        <div className="min-h-[200px] p-4 bg-muted rounded-lg prose prose-sm max-w-none">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {newComment || '*No content yet*'}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <textarea
+                          value={newComment}
+                          onChange={(e) => setNewComment(e.target.value)}
+                          placeholder={`Write your ${isInternalNote ? 'internal note' : 'response'}... (Markdown supported)`}
+                          className="w-full min-h-[200px] p-3 rounded-md border bg-background"
                         />
-                        <span className="text-sm text-gray-600">Internal Note</span>
-                      </label>
+                      )}
                     </div>
-                    <div className="space-x-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setShowMarkdownTips(!showMarkdownTips)}
-                      >
-                        {showMarkdownTips ? 'Hide Formatting Help' : 'Formatting Help'}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setShowPreview(!showPreview)}
-                      >
-                        {showPreview ? 'Edit' : 'Preview'}
-                      </Button>
-                    </div>
-                  </div>
-
-                  {showMarkdownTips && (
-                    <div className="p-4 bg-gray-50 rounded-lg text-sm">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {MARKDOWN_TIPS}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-
-                  {showPreview ? (
-                    <div className="min-h-[200px] p-4 bg-gray-50 rounded-lg prose prose-sm max-w-none">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {newComment || '*No content yet*'}
-                      </ReactMarkdown>
-                    </div>
-                  ) : (
-                    <textarea
-                      value={newComment}
-                      onChange={(e) => setNewComment(e.target.value)}
-                      placeholder={`Write your ${isInternalNote ? 'internal note' : 'response'}... (Markdown supported)`}
-                      className="w-full min-h-[200px] p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  )}
-
-                  <div className="flex justify-end">
-                    <Button
-                      variant="primary"
-                      onClick={() => handleAddComment(selectedTicket.id, newComment, isInternalNote)}
-                      disabled={!newComment.trim() || isSubmittingComment}
-                    >
-                      {isSubmittingComment ? 'Sending...' : isInternalNote ? 'Add Note' : 'Send Response'}
-                    </Button>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-        </Modal>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setIsDetailsModalOpen(false)}>
+                Close
+              </Button>
+              <Button
+                onClick={() => handleAddComment(selectedTicket.id, newComment, isInternalNote)}
+                disabled={!newComment.trim() || isSubmittingComment}
+              >
+                {isSubmittingComment ? 'Sending...' : isInternalNote ? 'Add Note' : 'Send Response'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
