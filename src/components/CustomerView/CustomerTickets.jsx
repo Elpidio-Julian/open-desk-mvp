@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../../services/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -8,6 +7,7 @@ import Table from '../SharedComponents/Table/Table';
 import Modal from '../SharedComponents/Modal/Modal';
 import Input from '../SharedComponents/Form/Input';
 import Alert from '../SharedComponents/Notification/Alert';
+import { customersService } from '../../services/api/customers';
 
 const MARKDOWN_TIPS = `
 ### Markdown Tips:
@@ -41,12 +41,7 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
 
   const fetchTickets = async () => {
     try {
-      const { data, error } = await supabase
-        .from('tickets')
-        .select('*')
-        .eq('created_by', user.id)
-        .order('created_at', { ascending: false });
-
+      const { data, error } = await customersService.getTickets(user.id);
       if (error) throw error;
       setTickets(data);
     } catch (error) {
@@ -59,36 +54,16 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
 
   const fetchTicketDetails = async (ticketId) => {
     try {
-      const { data: ticket, error: ticketError } = await supabase
-        .from('tickets')
-        .select(`
-          *,
-          created_by:users!tickets_created_by_fkey(full_name, email),
-          assigned_to:users!tickets_assigned_to_fkey(full_name, email)
-        `)
-        .eq('id', ticketId)
-        .single();
+      const [ticketResponse, commentsResponse] = await Promise.all([
+        customersService.getTicketDetails(ticketId, user.id),
+        customersService.getTicketComments(ticketId)
+      ]);
 
-      if (ticketError) throw ticketError;
-      setSelectedTicket(ticket);
+      if (ticketResponse.error) throw ticketResponse.error;
+      if (commentsResponse.error) throw commentsResponse.error;
 
-      const { data: comments, error: commentsError } = await supabase
-        .from('comments')
-        .select(`
-          id,
-          content,
-          created_at,
-          user_id,
-          is_internal,
-          user:users(id, full_name, email)
-        `)
-        .eq('ticket_id', ticketId)
-        .eq('is_internal', false)
-        .order('created_at', { ascending: true });
-
-      if (commentsError) throw commentsError;
-      setTicketComments(comments || []);
-
+      setSelectedTicket(ticketResponse.data);
+      setTicketComments(commentsResponse.data);
     } catch (error) {
       setAlert({
         type: 'error',
@@ -107,14 +82,11 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
     try {
       if (!user) throw new Error('You must be logged in to create a ticket');
       
-      const { data, error } = await supabase.from('tickets').insert([
-        {
-          title: newTicket.title,
-          description: newTicket.description,
-          status: 'open',
-          created_by: user.id,
-        },
-      ]);
+      const { error } = await customersService.createTicket({
+        title: newTicket.title,
+        description: newTicket.description,
+        created_by: user.id,
+      });
 
       if (error) throw error;
 
@@ -138,14 +110,11 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
 
     setIsSubmittingComment(true);
     try {
-      const { data, error } = await supabase.from('comments').insert([
-        {
-          ticket_id: selectedTicket.id,
-          user_id: user.id,
-          content: newComment.trim(),
-          is_internal: false,
-        },
-      ]);
+      const { error } = await customersService.addComment(
+        selectedTicket.id,
+        user.id,
+        newComment.trim()
+      );
 
       if (error) throw error;
       await fetchTicketDetails(selectedTicket.id);
