@@ -159,6 +159,10 @@ export const customersService = {
         .single();
 
       if (error) throw error;
+
+      // Auto-assign the newly created ticket
+      await routingService.autoAssignTicket(data.id);
+
       return { data };
     } catch (error) {
       return { error: error.message };
