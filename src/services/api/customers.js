@@ -102,32 +102,67 @@ export const customersService = {
         user:users(id, full_name, email)
       `)
       .eq('ticket_id', ticketId)
-      .eq('is_internal', false) // Only non-internal comments for customers
-      .order('created_at', { ascending: true });
+      .eq('is_internal', false); // Only non-internal comments for customers
     return { data, error };
   },
 
-  createTicket: async (ticketData) => {
-    const { data: ticket, error } = await supabase
-      .from('tickets')
-      .insert([{
-        ...ticketData,
-        status: 'open'
-      }])
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    // Attempt auto-assignment
+  async isIssueCategoryEnabled() {
     try {
-      await routingService.autoAssignTicket(ticket.id);
-    } catch (routingError) {
-      console.error('Auto-assignment failed:', routingError);
-      // Continue even if auto-assignment fails
-    }
+      const { data, error } = await supabase
+        .from('custom_field_definitions')
+        .select('*')
+        .eq('name', 'Issue Category')
+        .single();
 
-    return ticket;
+      if (error && error.code !== 'PGRST116') throw error;
+      return !!data;
+    } catch (error) {
+      console.error('Error checking issue category status:', error);
+      return false;
+    }
+  },
+
+  async getIssueCategories() {
+    try {
+      const { data, error } = await supabase
+        .from('custom_field_definitions')
+        .select('options')
+        .eq('name', 'Issue Category')
+        .single();
+
+      if (error) throw error;
+      return data?.options || [];
+    } catch (error) {
+      console.error('Error fetching issue categories:', error);
+      return [];
+    }
+  },
+
+  async createTicket(ticketData) {
+    try {
+      const isCategoryEnabled = await this.isIssueCategoryEnabled();
+      
+      if (isCategoryEnabled && !ticketData.custom_fields?.['Issue Category']) {
+        throw new Error('Issue Category is required');
+      }
+
+      const { data, error } = await supabase
+        .from('tickets')
+        .insert([{
+          ...ticketData,
+          status: 'open',
+          custom_fields: {
+            ...ticketData.custom_fields,
+          }
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { data };
+    } catch (error) {
+      return { error: error.message };
+    }
   },
 
   addComment: async (ticketId, userId, content) => {

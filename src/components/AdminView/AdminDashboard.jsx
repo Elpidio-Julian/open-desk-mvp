@@ -5,6 +5,7 @@ import { Button } from '../ui/button';
 import TeamManagement from './TeamManagement';
 import AdminAnalytics from './AdminAnalytics';
 import RoutingSettings from './RoutingSettings';
+import CustomFieldsManager from './CustomFieldsManager';
 
 const AdminDashboard = ({ 
   isWidget = false, 
@@ -38,9 +39,10 @@ const AdminDashboard = ({
 
       {!hideTabs && (
         <Tabs defaultValue={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="teams">Team Management</TabsTrigger>
             <TabsTrigger value="routing">Routing Rules</TabsTrigger>
+            <TabsTrigger value="custom-fields">Custom Fields</TabsTrigger>
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
           </TabsList>
 
@@ -50,6 +52,10 @@ const AdminDashboard = ({
 
           <TabsContent value="routing" className="space-y-4">
             <RoutingSettings />
+          </TabsContent>
+
+          <TabsContent value="custom-fields" className="space-y-4">
+            <CustomFieldsManager />
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-4">

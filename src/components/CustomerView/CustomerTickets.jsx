@@ -54,7 +54,12 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
   const [ticketComments, setTicketComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
-  const [newTicket, setNewTicket] = useState({ title: '', description: '', priority: 'medium' });
+  const [newTicket, setNewTicket] = useState({
+    title: '',
+    description: '',
+    priority: 'low',
+    custom_fields: {}
+  });
   const [alert, setAlert] = useState(null);
   const [showMarkdownTips, setShowMarkdownTips] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -63,10 +68,21 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
   const [feedback, setFeedback] = useState({ rating: '5', comment: '' });
   const [showClosedTickets, setShowClosedTickets] = useState(false);
+  const [issueCategories, setIssueCategories] = useState([]);
+  const [isCategoryEnabled, setIsCategoryEnabled] = useState(false);
+  const [filters, setFilters] = useState({
+    title: '',
+    status: '',
+    category: ''
+  });
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
 
   useEffect(() => {
     fetchTickets();
-  }, []);
+    if (isNewTicketModalOpen) {
+      checkIssueCategories();
+    }
+  }, [isNewTicketModalOpen]);
 
   const fetchTickets = async () => {
     try {
@@ -107,30 +123,51 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
     await fetchTicketDetails(ticket.id);
   };
 
+  const checkIssueCategories = async () => {
+    const enabled = await customersService.isIssueCategoryEnabled();
+    setIsCategoryEnabled(enabled);
+    if (enabled) {
+      const categories = await customersService.getIssueCategories();
+      setIssueCategories(categories);
+    }
+  };
+
   const handleCreateTicket = async () => {
     try {
-      if (!user) throw new Error('You must be logged in to create a ticket');
-      
-      const { error } = await customersService.createTicket({
+      if (isCategoryEnabled && !newTicket.custom_fields['Issue Category']) {
+        setAlert({
+          type: 'error',
+          message: 'Please select an issue category'
+        });
+        return;
+      }
+
+      const { data, error } = await customersService.createTicket({
         title: newTicket.title,
         description: newTicket.description,
-        created_by: user.id,
         priority: newTicket.priority,
+        created_by: user.id,
+        custom_fields: newTicket.custom_fields
       });
 
-      if (error) throw error;
+      if (error) throw new Error(error);
 
       setAlert({
         type: 'success',
-        message: 'Ticket created successfully!',
+        message: 'Ticket created successfully!'
       });
       setIsNewTicketModalOpen(false);
-      setNewTicket({ title: '', description: '', priority: 'medium' });
+      setNewTicket({
+        title: '',
+        description: '',
+        priority: 'low',
+        custom_fields: {}
+      });
       fetchTickets();
     } catch (error) {
       setAlert({
         type: 'error',
-        message: 'Failed to create ticket: ' + error.message,
+        message: 'Failed to create ticket: ' + error.message
       });
     }
   };
@@ -226,17 +263,59 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
     }
   };
 
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortedTickets = (ticketsToSort) => {
+    if (!sortConfig.key) return ticketsToSort;
+
+    return [...ticketsToSort].sort((a, b) => {
+      if (a[sortConfig.key] < b[sortConfig.key]) {
+        return sortConfig.direction === 'asc' ? -1 : 1;
+      }
+      if (a[sortConfig.key] > b[sortConfig.key]) {
+        return sortConfig.direction === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+  };
+
   const columns = [
     {
       accessorKey: "title",
-      header: "Title",
+      header: (
+        <div
+          className="flex items-center gap-2 cursor-pointer"
+          onClick={() => handleSort('title')}
+        >
+          Title
+          {sortConfig.key === 'title' && (
+            <span>{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+          )}
+        </div>
+      ),
       cell: ({ row }) => (
         <div className="font-medium">{row.original.title}</div>
       ),
     },
     {
       accessorKey: "status",
-      header: "Status",
+      header: (
+        <div
+          className="flex items-center gap-2 cursor-pointer"
+          onClick={() => handleSort('status')}
+        >
+          Status
+          {sortConfig.key === 'status' && (
+            <span>{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+          )}
+        </div>
+      ),
       cell: ({ row }) => (
         <Badge variant={getStatusVariant(row.original.status)}>
           {row.original.status}
@@ -245,7 +324,17 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
     },
     {
       accessorKey: "created_at",
-      header: "Created",
+      header: (
+        <div
+          className="flex items-center gap-2 cursor-pointer"
+          onClick={() => handleSort('created_at')}
+        >
+          Created
+          {sortConfig.key === 'created_at' && (
+            <span>{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+          )}
+        </div>
+      ),
       cell: ({ row }) => (
         <div className="text-muted-foreground">
           {new Date(row.original.created_at).toLocaleDateString()}
@@ -283,6 +372,10 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
   const activeTickets = tickets.filter(ticket => ticket.status !== 'closed');
   const closedTickets = tickets.filter(ticket => ticket.status === 'closed');
 
+  // Update the table body to use sorted tickets
+  const sortedActiveTickets = getSortedTickets(activeTickets);
+  const sortedClosedTickets = getSortedTickets(closedTickets);
+
   return (
     <div className="p-8" style={containerStyle}>
       {alert && (
@@ -317,7 +410,7 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {activeTickets.map((ticket) => (
+            {sortedActiveTickets.map((ticket) => (
               <TableRow
                 key={ticket.id}
                 onClick={() => handleTicketClick(ticket)}
@@ -330,7 +423,7 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
                 ))}
               </TableRow>
             ))}
-            {activeTickets.length === 0 && (
+            {sortedActiveTickets.length === 0 && (
               <TableRow>
                 <TableCell colSpan={columns.length} className="text-center text-muted-foreground">
                   No active tickets found
@@ -341,14 +434,14 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
         </Table>
       </div>
 
-      {closedTickets.length > 0 && (
+      {sortedClosedTickets.length > 0 && (
         <div className="mt-8">
           <Button
             variant="outline"
             className="mb-2 w-full flex justify-between items-center"
             onClick={() => setShowClosedTickets(!showClosedTickets)}
           >
-            <span>Closed Tickets ({closedTickets.length})</span>
+            <span>Closed Tickets ({sortedClosedTickets.length})</span>
             {showClosedTickets ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           </Button>
           
@@ -365,7 +458,7 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {closedTickets.map((ticket) => (
+                  {sortedClosedTickets.map((ticket) => (
                     <TableRow
                       key={ticket.id}
                       onClick={() => handleTicketClick(ticket)}
@@ -403,6 +496,34 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
                 onChange={(e) => setNewTicket({ ...newTicket, title: e.target.value })}
                 placeholder="Brief description of your issue"
               />
+            </div>
+            <div>
+              {isCategoryEnabled && (
+                <div className="space-y-2">
+                  <Label>Issue Category {isCategoryEnabled && <span className="text-red-500">*</span>}</Label>
+                  <Select
+                    value={newTicket.custom_fields['Issue Category'] || ''}
+                    onValueChange={(value) => setNewTicket(prev => ({
+                      ...prev,
+                      custom_fields: {
+                        ...prev.custom_fields,
+                        'Issue Category': value
+                      }
+                    }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {issueCategories.map(category => (
+                        <SelectItem key={category} value={category}>
+                          {category}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
             <div>
               <Label htmlFor="description">Description</Label>
@@ -477,7 +598,29 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
                     </Badge>
                   </div>
                 </div>
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                <div className="flex flex-col gap-2">
+                  {selectedTicket.custom_fields?.['Issue Category'] && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">Category:</span>
+                      <Badge variant="outline">
+                        {selectedTicket.custom_fields['Issue Category']}
+                      </Badge>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Priority:</span>
+                    <Badge variant="secondary">
+                      {selectedTicket.priority}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Created:</span>
+                    <span className="text-sm">
+                      {new Date(selectedTicket.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap mt-4">
                   {selectedTicket.description}
                 </p>
               </div>
