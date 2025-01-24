@@ -84,7 +84,7 @@ export const teamsService = {
   },
 
   // Agent operations for teams
-  getAvailableAgents: async (teamId, page = 1, search = '', itemsPerPage = 10) => {
+  getAvailableAgents: async (teamId, search = '') => {
     // First get team members to exclude
     const { data: teamMembers } = await supabase
       .from('team_members')
@@ -94,7 +94,7 @@ export const teamsService = {
     // Build the query
     let query = supabase
       .from('users')
-      .select('id, full_name, email, role', { count: 'exact' })
+      .select('id, full_name, email, role')
       .eq('role', 'agent')
       .order('full_name');
 
@@ -109,13 +109,8 @@ export const teamsService = {
       query = query.not('id', 'in', `(${memberIds.join(',')})`);
     }
 
-    // Add pagination
-    const start = (page - 1) * itemsPerPage;
-    const end = start + itemsPerPage - 1;
-    query = query.range(start, end);
-
     // Execute query
-    const { data, error, count } = await query;
-    return { data, error, count };
+    const { data, error } = await query;
+    return { data, error, count: data?.length || 0 };
   }
 }; 

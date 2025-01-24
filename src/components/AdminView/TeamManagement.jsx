@@ -29,14 +29,10 @@ const COMMON_SKILLS = [
   'Backend', 'Mobile', 'API', 'Infrastructure'
 ];
 
-const ITEMS_PER_PAGE = 10;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
-
 const TeamManagement = () => {
   const [teams, setTeams] = useState([]);
   const [agents, setAgents] = useState({});
   const [selectedAgents, setSelectedAgents] = useState({});
-  const [agentPages, setAgentPages] = useState({});
   const [loading, setLoading] = useState(false);
   const [agentLoading, setAgentLoading] = useState({});
   const [error, setError] = useState(null);
@@ -44,9 +40,7 @@ const TeamManagement = () => {
   const [editingTeam, setEditingTeam] = useState(null);
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [deleteConfirmTeam, setDeleteConfirmTeam] = useState(null);
-  const [agentSearch, setAgentSearch] = useState('');
   const [selectedSkills, setSelectedSkills] = useState({});
-  const debouncedSearch = useDebounce(agentSearch, 300);
 
   useEffect(() => {
     fetchTeamsAndAgents();
@@ -62,15 +56,8 @@ const TeamManagement = () => {
 
       setTeams(teamsData || []);
 
-      // Initialize pagination state for each team
-      const initialPages = {};
-      teamsData?.forEach(team => {
-        initialPages[team.id] = 1;
-      });
-      setAgentPages(initialPages);
-
-      // Fetch first page of agents for each team
-      await Promise.all((teamsData || []).map(team => fetchAgentsForTeam(team.id, 1)));
+      // Fetch agents for each team
+      await Promise.all((teamsData || []).map(team => fetchAgentsForTeam(team.id)));
     } catch (err) {
       console.error('Error:', err);
       setError(err.message);
@@ -79,12 +66,12 @@ const TeamManagement = () => {
     }
   };
 
-  const fetchAgentsForTeam = async (teamId, page = 1, search = '') => {
+  const fetchAgentsForTeam = async (teamId, search = '') => {
     try {
       setAgentLoading(prev => ({ ...prev, [teamId]: true }));
 
       const { data: availableAgents, error: agentsError, count } = 
-        await teamsService.getAvailableAgents(teamId, page, search, ITEMS_PER_PAGE);
+        await teamsService.getAvailableAgents(teamId, search);
 
       if (agentsError) throw agentsError;
 
@@ -101,20 +88,6 @@ const TeamManagement = () => {
     } finally {
       setAgentLoading(prev => ({ ...prev, [teamId]: false }));
     }
-  };
-
-  // Debounced search effect
-  useEffect(() => {
-    if (debouncedSearch !== agentSearch) {
-      teams.forEach(team => {
-        fetchAgentsForTeam(team.id, 1, debouncedSearch);
-      });
-    }
-  }, [debouncedSearch]);
-
-  const handlePageChange = (teamId, newPage) => {
-    setAgentPages(prev => ({ ...prev, [teamId]: newPage }));
-    fetchAgentsForTeam(teamId, newPage, agentSearch);
   };
 
   const createTeam = async () => {
@@ -317,12 +290,6 @@ const TeamManagement = () => {
 
             {/* Add Member */}
             <div className="space-y-2 mb-2">
-              <Input
-                placeholder="Search agents..."
-                value={agentSearch}
-                onChange={(e) => setAgentSearch(e.target.value)}
-                className="w-full"
-              />
               <div className="flex gap-2">
                 <Select
                   value={selectedAgents[team.id] || ''}
@@ -355,29 +322,6 @@ const TeamManagement = () => {
                   Add
                 </Button>
               </div>
-              {agents[team.id]?.totalCount > 1 && (
-                <div className="flex justify-center gap-2 mt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePageChange(team.id, agentPages[team.id] - 1)}
-                    disabled={agentPages[team.id] === 1 || agentLoading[team.id]}
-                  >
-                    Previous
-                  </Button>
-                  <span className="py-1">
-                    Page {agentPages[team.id]} of {Math.ceil(agents[team.id]?.totalCount / ITEMS_PER_PAGE)}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePageChange(team.id, agentPages[team.id] + 1)}
-                    disabled={agentPages[team.id] === Math.ceil(agents[team.id]?.totalCount / ITEMS_PER_PAGE) || agentLoading[team.id]}
-                  >
-                    Next
-                  </Button>
-                </div>
-              )}
             </div>
 
             {/* Add Skill */}
