@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Progress } from '../ui/progress';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
+import { Trash2, ChevronDown, ChevronUp, Search } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 
 export default function RoutingStats() {
@@ -12,6 +16,10 @@ export default function RoutingStats() {
     agentAssignments: [],
     avgAssignmentTime: 0
   });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [deleteRuleId, setDeleteRuleId] = useState(null);
+  const [expandedRuleId, setExpandedRuleId] = useState(null);
+  const [alert, setAlert] = useState(null);
 
   useEffect(() => {
     loadStats();
@@ -90,6 +98,14 @@ export default function RoutingStats() {
     }
   };
 
+  const toggleRule = (ruleId) => {
+    setExpandedRuleId(expandedRuleId === ruleId ? null : ruleId);
+  };
+
+  const filteredRules = stats.ruleMatches.filter(rule => 
+    rule.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-4">
@@ -123,20 +139,72 @@ export default function RoutingStats() {
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Rule Performance</h3>
           <div className="space-y-4">
-            {stats.ruleMatches.map(rule => (
-              <div key={rule.id} className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="font-medium">{rule.name}</span>
-                  <Badge variant="secondary">{rule.count} matches</Badge>
-                </div>
-                <Progress 
-                  value={(rule.count / stats.total) * 100} 
-                  className="h-2"
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-semibold">Rule Performance</h3>
+              <div className="relative w-64">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search rules..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8"
                 />
               </div>
-            ))}
+            </div>
+            
+            <div className="space-y-2 max-h-[400px] overflow-y-auto">
+              {filteredRules.map(rule => (
+                <Card 
+                  key={rule.id} 
+                  className={`border p-2 transition-all hover:bg-accent ${expandedRuleId === rule.id ? 'bg-muted' : ''}`}
+                >
+                  <div 
+                    className="flex justify-between items-center cursor-pointer"
+                    onClick={() => toggleRule(rule.id)}
+                  >
+                    <div className="flex items-center gap-2">
+                      {expandedRuleId === rule.id ? (
+                        <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      <span className="font-medium">{rule.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary">{rule.count} matches</Badge>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteRuleId(rule.id);
+                        }}
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  {expandedRuleId === rule.id && (
+                    <div className="mt-2 pt-2 border-t">
+                      <div className="text-sm text-muted-foreground">
+                        Match Rate: {((rule.count / stats.total) * 100).toFixed(1)}%
+                      </div>
+                      <Progress 
+                        value={(rule.count / stats.total) * 100} 
+                        className="h-2 mt-2"
+                      />
+                    </div>
+                  )}
+                </Card>
+              ))}
+              {filteredRules.length === 0 && (
+                <div className="text-center py-4 text-muted-foreground">
+                  No rules found matching "{searchQuery}"
+                </div>
+              )}
+            </div>
           </div>
         </Card>
 
@@ -161,6 +229,8 @@ export default function RoutingStats() {
           </div>
         </Card>
       </div>
+
+      {/* ... existing dialog ... */}
     </div>
   );
 } 

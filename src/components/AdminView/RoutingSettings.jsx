@@ -12,7 +12,7 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
-import { PlusCircle, X } from "lucide-react";
+import { PlusCircle, X, Search, ChevronDown, ChevronUp } from "lucide-react";
 import { routingService } from '../../services/api/routing';
 import { supabase } from '../../services/supabase';
 import RoutingStats from './RoutingStats';
@@ -36,6 +36,8 @@ export default function RoutingSettings() {
     is_active: true
   });
   const [alert, setAlert] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [expandedRuleId, setExpandedRuleId] = useState(null);
 
   useEffect(() => {
     loadRoutingRules();
@@ -148,6 +150,14 @@ export default function RoutingSettings() {
       setAlert({ variant: 'destructive', message: 'Failed to create rule' });
     }
   };
+
+  const toggleRule = (ruleId) => {
+    setExpandedRuleId(expandedRuleId === ruleId ? null : ruleId);
+  };
+
+  const filteredRules = rules.filter(rule => 
+    rule.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <div className="space-y-6">
@@ -278,119 +288,56 @@ export default function RoutingSettings() {
 
         {/* Routing Rules Section */}
         <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Routing Rules</h3>
-
-          {/* New Rule Form */}
-          <Card className="p-4 border mb-6">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>New Rule Name</Label>
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-semibold">Routing Rules</h3>
+              <div className="relative w-64">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  value={newRule.name}
-                  onChange={(e) => setNewRule({
-                    ...newRule,
-                    name: e.target.value
-                  })}
-                  placeholder="Enter rule name"
+                  placeholder="Search rules..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8"
                 />
               </div>
-
-              <div className="space-y-2">
-                <Label>Description</Label>
-                <Input
-                  value={newRule.description}
-                  onChange={(e) => setNewRule({
-                    ...newRule,
-                    description: e.target.value
-                  })}
-                  placeholder="Enter rule description"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Priority</Label>
-                <Select
-                  value={newRule.conditions.priority || ''}
-                  onValueChange={(value) => setNewRule({
-                    ...newRule,
-                    conditions: {
-                      ...newRule.conditions,
-                      priority: value
-                    }
-                  })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select priority" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Weight</Label>
-                <Select
-                  value={newRule.weight.toString()}
-                  onValueChange={(value) => setNewRule({
-                    ...newRule,
-                    weight: parseInt(value)
-                  })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[1, 2, 3, 4, 5].map(weight => (
-                      <SelectItem key={weight} value={weight.toString()}>
-                        {weight}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Button
-                onClick={handleCreateRule}
-                className="w-full"
-              >
-                <PlusCircle className="w-4 h-4 mr-2" />
-                Create Rule
-              </Button>
             </div>
-          </Card>
 
-          {/* Existing Rules List */}
-          <div className="space-y-6">
-            {rules.map((rule) => (
-              <Card key={rule.id} className="p-4 border">
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Rule Name</Label>
-                    <Input
-                      value={rule.name}
-                      onChange={(e) => handleUpdateRule(rule.id, { name: e.target.value })}
-                    />
-                  </div>
+            {/* New Rule Form */}
+            <Card className="p-4 border">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>New Rule Name</Label>
+                  <Input
+                    value={newRule.name}
+                    onChange={(e) => setNewRule({
+                      ...newRule,
+                      name: e.target.value
+                    })}
+                    placeholder="Enter rule name"
+                  />
+                </div>
 
-                  <div className="space-y-2">
-                    <Label>Description</Label>
-                    <Input
-                      value={rule.description}
-                      onChange={(e) => handleUpdateRule(rule.id, { description: e.target.value })}
-                    />
-                  </div>
+                <div className="space-y-2">
+                  <Label>Description</Label>
+                  <Input
+                    value={newRule.description}
+                    onChange={(e) => setNewRule({
+                      ...newRule,
+                      description: e.target.value
+                    })}
+                    placeholder="Enter rule description"
+                  />
+                </div>
 
+                <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Priority</Label>
                     <Select
-                      value={rule.conditions?.priority || ''}
-                      onValueChange={(value) => handleUpdateRule(rule.id, {
+                      value={newRule.conditions.priority || ''}
+                      onValueChange={(value) => setNewRule({
+                        ...newRule,
                         conditions: {
-                          ...rule.conditions,
+                          ...newRule.conditions,
                           priority: value
                         }
                       })}
@@ -410,8 +357,11 @@ export default function RoutingSettings() {
                   <div className="space-y-2">
                     <Label>Weight</Label>
                     <Select
-                      value={rule.weight.toString()}
-                      onValueChange={(value) => handleUpdateRule(rule.id, { weight: parseInt(value) })}
+                      value={newRule.weight.toString()}
+                      onValueChange={(value) => setNewRule({
+                        ...newRule,
+                        weight: parseInt(value)
+                      })}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -425,17 +375,115 @@ export default function RoutingSettings() {
                       </SelectContent>
                     </Select>
                   </div>
-
-                  <Button
-                    variant={rule.is_active ? "default" : "secondary"}
-                    onClick={() => handleUpdateRule(rule.id, { is_active: !rule.is_active })}
-                    className="w-full"
-                  >
-                    {rule.is_active ? 'Active' : 'Inactive'}
-                  </Button>
                 </div>
-              </Card>
-            ))}
+
+                <Button
+                  onClick={handleCreateRule}
+                  className="w-full"
+                >
+                  Create Rule
+                </Button>
+              </div>
+            </Card>
+
+            {/* Existing Rules List */}
+            <div className="space-y-2 max-h-[400px] overflow-y-auto">
+              {filteredRules.map((rule) => (
+                <Card 
+                  key={rule.id} 
+                  className={`border p-2 transition-all hover:bg-accent ${expandedRuleId === rule.id ? 'bg-muted' : ''}`}
+                >
+                  <div 
+                    className="flex justify-between items-center cursor-pointer"
+                    onClick={() => toggleRule(rule.id)}
+                  >
+                    <div className="flex items-center gap-2">
+                      {expandedRuleId === rule.id ? (
+                        <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      <span className="font-medium">{rule.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={rule.is_active ? "default" : "secondary"}>
+                        {rule.is_active ? 'Active' : 'Inactive'}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleUpdateRule(rule.id, { is_active: !rule.is_active });
+                        }}
+                      >
+                        {rule.is_active ? 'Deactivate' : 'Activate'}
+                      </Button>
+                    </div>
+                  </div>
+                  {expandedRuleId === rule.id && (
+                    <div className="mt-2 pt-2 border-t space-y-4">
+                      <div className="space-y-2">
+                        <Label>Description</Label>
+                        <Input
+                          value={rule.description}
+                          onChange={(e) => handleUpdateRule(rule.id, { description: e.target.value })}
+                        />
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Priority</Label>
+                          <Select
+                            value={rule.conditions?.priority || ''}
+                            onValueChange={(value) => handleUpdateRule(rule.id, {
+                              conditions: {
+                                ...rule.conditions,
+                                priority: value
+                              }
+                            })}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select priority" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="low">Low</SelectItem>
+                              <SelectItem value="medium">Medium</SelectItem>
+                              <SelectItem value="high">High</SelectItem>
+                              <SelectItem value="urgent">Urgent</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Weight</Label>
+                          <Select
+                            value={rule.weight.toString()}
+                            onValueChange={(value) => handleUpdateRule(rule.id, { weight: parseInt(value) })}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {[1, 2, 3, 4, 5].map(weight => (
+                                <SelectItem key={weight} value={weight.toString()}>
+                                  {weight}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              ))}
+              {filteredRules.length === 0 && (
+                <div className="text-center py-4 text-muted-foreground">
+                  No rules found matching "{searchQuery}"
+                </div>
+              )}
+            </div>
           </div>
         </Card>
       </div>
