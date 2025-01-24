@@ -33,6 +33,10 @@ const Header = () => {
       return () => clearInterval(interval);
     }
   }, [user, userRole]);
+  
+  const handleHelpClick = () => {
+    window.location.href = '/faqs';
+  };
 
   const loadNotifications = async () => {
     try {
@@ -143,6 +147,11 @@ const Header = () => {
         icon: Search,
         onClick: () => setShowSearch(true),
         show: !showSearch,
+      },
+      {
+        label: 'Help',
+        icon: HelpCircle,
+        onClick: () => {handleHelpClick()},
       }
     ];
 
@@ -163,11 +172,6 @@ const Header = () => {
       case 'customer':
         return [
           ...commonActions,
-          {
-            label: 'Help',
-            icon: HelpCircle,
-            onClick: () => {/* Add help handler */},
-          }
         ];
       default:
         return commonActions;

@@ -10,6 +10,7 @@ import { RoleProvider } from './contexts/RoleContext';
 import { useAuth } from './contexts/AuthContext';
 import { useRole } from './contexts/RoleContext';
 import AgentMetricsPage from './components/AgentView/pages/AgentMetricsPage';
+import FAQs from './components/SharedComponents/pages/FAQs';
 // Protected route wrapper with role check
 const ProtectedRoute = ({ children, requiredRole }) => {
   const { user } = useAuth();
@@ -65,6 +66,14 @@ const AppRoutes = () => {
         element={
           <ProtectedRoute>
             <AgentMetricsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/faqs"
+        element={
+          <ProtectedRoute>
+            <FAQs />
           </ProtectedRoute>
         }
       />
