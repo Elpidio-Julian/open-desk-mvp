@@ -12,6 +12,7 @@ import { useRole } from './contexts/RoleContext';
 import AgentMetricsPage from './components/AgentView/pages/AgentMetricsPage';
 import FAQs from './components/SharedComponents/pages/FAQs';
 import FAQEditorPage from './components/AdminView/pages/FAQEditorPage';
+import Landing from './pages/Landing';
 
 // Protected route wrapper with role check
 const ProtectedRoute = ({ children, requiredRole }) => {
@@ -28,7 +29,10 @@ const AppRoutes = () => {
   return (
     <Routes>
       {/* Public routes */}
+      <Route path="/" element={<Navigate to="/landing" />} />
+      <Route path="/landing" element={<Landing />} />
       <Route path="/login" element={<Login />} />
+      <Route path="/faqs" element={<FAQs />} />
 
       {/* Protected routes */}
       <Route
@@ -76,14 +80,6 @@ const AppRoutes = () => {
         element={
           <ProtectedRoute>
             <AgentMetricsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/faqs"
-        element={
-          <ProtectedRoute>
-            <FAQs />
           </ProtectedRoute>
         }
       />
