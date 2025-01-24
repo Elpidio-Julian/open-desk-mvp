@@ -17,6 +17,7 @@ const Login = () => {
   const { setUserRole } = useRole();
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
+  const [loginMethod, setLoginMethod] = useState('password'); // 'password' or 'magic-link'
   const [formData, setFormData] = useState({
     email: '',
     fullName: '',
@@ -81,23 +82,42 @@ const Login = () => {
       setLoading(true);
       setAlert(null);
 
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email: formData.email,
-        password: formData.password
-      });
+      let signInResult;
 
-      if (signInError) throw signInError;
+      if (loginMethod === 'password') {
+        signInResult = await supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password
+        });
+      } else {
+        signInResult = await supabase.auth.signInWithOtp({
+          email: formData.email
+        });
 
-      // Fetch user role after successful sign in
-      const { data: userData, error: roleError } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', (await supabase.auth.getUser()).data.user.id)
-        .single();
+        if (!signInResult.error) {
+          setAlert({
+            variant: 'default',
+            message: 'Check your email for the magic link!, only the most recent link will work'
+          });
+          setLoading(false);
+          return;
+        }
+      }
 
-      if (roleError) throw roleError;
-      setUserRole(userData.role);
-      navigate('/dashboard');
+      if (signInResult.error) throw signInResult.error;
+
+      // Only fetch role and navigate if using password login
+      if (loginMethod === 'password') {
+        const { data: userData, error: roleError } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', (await supabase.auth.getUser()).data.user.id)
+          .single();
+
+        if (roleError) throw roleError;
+        setUserRole(userData.role);
+        navigate('/dashboard');
+      }
 
     } catch (error) {
       setAlert({
@@ -112,7 +132,7 @@ const Login = () => {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <Card className="w-full max-w-md p-6 space-y-6">
-        <h1 className="text-2xl font-bold text-center">Welcome to Support Desk</h1>
+        <h1 className="text-2xl font-bold text-center">Welcome to Better Ticket Master</h1>
         
         {alert && (
           <Alert variant={alert.variant}>
@@ -137,28 +157,50 @@ const Login = () => {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Password</Label>
-              <Input
-                type="password"
-                placeholder="Enter your password"
-                value={formData.password}
-                onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+            <div className="flex items-center space-x-2 mb-4">
+              <input
+                type="radio"
+                id="password-login"
+                checked={loginMethod === 'password'}
+                onChange={() => setLoginMethod('password')}
+                className="h-4 w-4"
               />
+              <Label htmlFor="password-login">Password Login</Label>
+              
+              <input
+                type="radio"
+                id="magic-link"
+                checked={loginMethod === 'magic-link'}
+                onChange={() => setLoginMethod('magic-link')}
+                className="h-4 w-4 ml-4"
+              />
+              <Label htmlFor="magic-link">Magic Link</Label>
             </div>
+
+            {loginMethod === 'password' && (
+              <div className="space-y-2">
+                <Label>Password</Label>
+                <Input
+                  type="password"
+                  placeholder="Enter your password"
+                  value={formData.password}
+                  onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                />
+              </div>
+            )}
 
             <Button
               onClick={handleLogin}
-              disabled={loading || !formData.email || !formData.password}
+              disabled={loading || !formData.email || (loginMethod === 'password' && !formData.password)}
               className="w-full"
             >
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Logging in...
+                  {loginMethod === 'password' ? 'Logging in...' : 'Sending Link...'}
                 </>
               ) : (
-                'Log In'
+                loginMethod === 'password' ? 'Log In' : 'Send Magic Link'
               )}
             </Button>
           </TabsContent>
