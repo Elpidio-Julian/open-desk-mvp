@@ -6,6 +6,7 @@ import TeamManagement from './TeamManagement';
 import AdminAnalytics from './AdminAnalytics';
 import RoutingSettings from './RoutingSettings';
 import CustomFieldsManager from './CustomFieldsManager';
+import AgentManager from './AgentManager';
 
 const AdminDashboard = ({ 
   isWidget = false, 
@@ -39,8 +40,9 @@ const AdminDashboard = ({
 
       {!hideTabs && (
         <Tabs defaultValue="team" className="w-full">
-          <TabsList className="grid w-full grid-cols-4 gap-4">
+          <TabsList className="grid w-full grid-cols-5 gap-4">
             <TabsTrigger value="team">Team Management</TabsTrigger>
+            <TabsTrigger value="agents">Agent Management</TabsTrigger>
             <TabsTrigger value="routing">Routing Rules</TabsTrigger>
             <TabsTrigger value="custom-fields">Custom Fields</TabsTrigger>
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
@@ -49,6 +51,9 @@ const AdminDashboard = ({
           <div className="mt-6">
             <TabsContent value="team">
               <TeamManagement />
+            </TabsContent>
+            <TabsContent value="agents">
+              <AgentManager />
             </TabsContent>
             <TabsContent value="routing">
               <RoutingSettings />
