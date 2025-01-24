@@ -134,6 +134,7 @@ export default function CustomFieldsManager() {
       const { data, error } = await supabase
         .from('custom_field_definitions')
         .select('*')
+        .eq('content_type', 'field')  // Only fetch regular custom fields
         .order('name');
 
       if (error) throw error;

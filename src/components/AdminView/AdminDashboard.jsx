@@ -38,34 +38,33 @@ const AdminDashboard = ({
       </div>
 
       {!hideTabs && (
-        <Tabs defaultValue={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="teams">Team Management</TabsTrigger>
+        <Tabs defaultValue="team" className="w-full">
+          <TabsList className="grid w-full grid-cols-4 gap-4">
+            <TabsTrigger value="team">Team Management</TabsTrigger>
             <TabsTrigger value="routing">Routing Rules</TabsTrigger>
             <TabsTrigger value="custom-fields">Custom Fields</TabsTrigger>
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="teams" className="space-y-4">
-            <TeamManagement />
-          </TabsContent>
-
-          <TabsContent value="routing" className="space-y-4">
-            <RoutingSettings />
-          </TabsContent>
-
-          <TabsContent value="custom-fields" className="space-y-4">
-            <CustomFieldsManager />
-          </TabsContent>
-
-          <TabsContent value="analytics" className="space-y-4">
-            <Card>
-              <div className="p-4">
-                <h3 className="text-xl font-semibold mb-4">Team Performance</h3>
-                <AdminAnalytics />
-              </div>
-            </Card>
-          </TabsContent>
+          <div className="mt-6">
+            <TabsContent value="team">
+              <TeamManagement />
+            </TabsContent>
+            <TabsContent value="routing">
+              <RoutingSettings />
+            </TabsContent>
+            <TabsContent value="custom-fields">
+              <CustomFieldsManager />
+            </TabsContent>
+            <TabsContent value="analytics">
+              <Card>
+                <div className="p-4">
+                  <h3 className="text-xl font-semibold mb-4">Team Performance</h3>
+                  <AdminAnalytics />
+                </div>
+              </Card>
+            </TabsContent>
+          </div>
         </Tabs>
       )}
     </>

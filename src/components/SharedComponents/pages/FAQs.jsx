@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../../services/supabase';
 import {
   Accordion,
   AccordionContent,
@@ -10,72 +11,52 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui/tabs";
 import { SidebarProvider } from "../../ui/sidebar";
 import AppSidebar from "../Layout/AppSidebar";
 import Header from "../Layout/Header";
+import { Alert, AlertDescription } from "../../ui/alert";
+import { Badge } from "../../ui/badge";
+import ReactMarkdown from 'react-markdown';
 
 const FAQs = () => {
-  const [activeCategory, setActiveCategory] = useState("getting-started");
+  const [activeTab, setActiveTab] = useState("faqs");
+  const [items, setItems] = useState([]);
+  const [alert, setAlert] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState(null);
 
-  const faqsByCategory = {
-    "getting-started": {
-      label: "Getting Started",
-      items: [
-        {
-          question: "How do I create a new support ticket?",
-          answer: "To create a new ticket, click the 'Create New Ticket' button in your dashboard. Fill in the title, description, and select the appropriate category and priority level. We'll respond to your ticket as soon as possible."
-        },
-        {
-          question: "What information should I include in my ticket?",
-          answer: "Include:\n- Clear description of the issue\n- Steps to reproduce the problem\n- Any error messages you've received\n- What you've already tried\n- Impact on your work"
-        }
-      ]
-    },
-    "ticket-management": {
-      label: "Ticket Management",
-      items: [
-        {
-          question: "What do the different ticket priorities mean?",
-          answer: "Low Priority: General inquiries and minor issues\nMedium Priority: Issues affecting your work but with workarounds available\nHigh Priority: Critical issues severely impacting your operations"
-        },
-        {
-          question: "Can I update my ticket after submitting it?",
-          answer: "Yes, you can add comments to your ticket at any time. This is helpful for providing additional information or responding to agent questions. You can also mark your ticket as resolved when your issue is fixed."
-        },
-        {
-          question: "How do I view my ticket history?",
-          answer: "All your tickets are visible in your dashboard. Active tickets appear at the top, and you can view closed tickets by clicking the 'Closed Tickets' button at the bottom of the list."
-        }
-      ]
-    },
-    "response-times": {
-      label: "Response Times",
-      items: [
-        {
-          question: "How long will it take to get a response?",
-          answer: "Our response times vary based on ticket priority:\nHigh Priority: Within 2 hours\nMedium Priority: Within 8 hours\nLow Priority: Within 24 hours\nThese are estimated times and may vary based on ticket volume."
-        },
-        {
-          question: "What should I do if my issue is urgent?",
-          answer: "For urgent issues, create a ticket with 'High' priority and provide as much detail as possible. This helps our support team understand and address your issue quickly."
-        },
-        {
-          question: "What are your support hours?",
-          answer: "Our support team is available:\nMonday-Friday: 9:00 AM - 6:00 PM\nUrgent issues are monitored 24/7 for high-priority tickets."
-        }
-      ]
-    },
-    "feedback": {
-      label: "Feedback & Resolution",
-      items: [
-        {
-          question: "How do I provide feedback on support?",
-          answer: "When a ticket is resolved, you'll have the option to provide feedback through a rating system and comments. This helps us improve our support quality."
-        },
-        {
-          question: "What happens after I mark a ticket as resolved?",
-          answer: "After marking a ticket as resolved, you'll be prompted to provide feedback. The ticket will then be moved to your closed tickets list, but can be referenced or reopened if needed."
-        }
-      ]
+  useEffect(() => {
+    loadItems();
+  }, [activeTab]);
+
+  const loadItems = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('custom_field_definitions')
+        .select('*')
+        .eq('content_type', activeTab === 'faqs' ? 'faq' : 'article')
+        .order('order_index');
+
+      if (error) throw error;
+
+      // Extract unique categories
+      const uniqueCategories = [...new Set(data.map(item => item.category).filter(Boolean))];
+      setCategories(uniqueCategories);
+      
+      // If no category is selected, select the first one
+      if (!selectedCategory && uniqueCategories.length > 0) {
+        setSelectedCategory(uniqueCategories[0]);
+      }
+
+      setItems(data || []);
+    } catch (error) {
+      setAlert({
+        type: 'error',
+        message: 'Failed to load content: ' + error.message
+      });
     }
   };
+
+  const filteredItems = selectedCategory
+    ? items.filter(item => item.category === selectedCategory)
+    : items;
 
   return (
     <SidebarProvider defaultOpen={false}>
@@ -85,36 +66,98 @@ const FAQs = () => {
           <Header />
           <main className="flex-1 overflow-y-auto bg-background">
             <div className="container mx-auto p-8 max-w-4xl">
-              <h1 className="text-2xl font-bold mb-6">Frequently Asked Questions</h1>
+              <h1 className="text-2xl font-bold mb-6">Help Center</h1>
               
-              <Tabs defaultValue={activeCategory} onValueChange={setActiveCategory}>
+              {alert && (
+                <Alert variant={alert.type === 'error' ? 'destructive' : 'default'} className="mb-6">
+                  <AlertDescription>{alert.message}</AlertDescription>
+                </Alert>
+              )}
+
+              <Tabs defaultValue={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="mb-4">
-                  {Object.entries(faqsByCategory).map(([key, category]) => (
-                    <TabsTrigger key={key} value={key}>
-                      {category.label}
-                    </TabsTrigger>
-                  ))}
+                  <TabsTrigger value="faqs">FAQs</TabsTrigger>
+                  <TabsTrigger value="articles">Articles</TabsTrigger>
                 </TabsList>
 
-                {Object.entries(faqsByCategory).map(([key, category]) => (
-                  <TabsContent key={key} value={key}>
-                    <Card className="p-6">
-                      <h2 className="text-xl font-semibold mb-4">{category.label}</h2>
-                      <Accordion type="single" collapsible className="space-y-2">
-                        {category.items.map((faq, index) => (
-                          <AccordionItem key={index} value={`item-${index}`}>
-                            <AccordionTrigger className="text-left">
-                              {faq.question}
-                            </AccordionTrigger>
-                            <AccordionContent className="text-muted-foreground whitespace-pre-line">
-                              {faq.answer}
-                            </AccordionContent>
-                          </AccordionItem>
+                <TabsContent value="faqs">
+                  {categories.length > 0 && (
+                    <div className="flex gap-2 mb-4">
+                      {categories.map(category => (
+                        <Badge
+                          key={category}
+                          variant={selectedCategory === category ? 'default' : 'outline'}
+                          className="cursor-pointer"
+                          onClick={() => setSelectedCategory(category)}
+                        >
+                          {category}
+                        </Badge>
+                      ))}
+                      <Badge
+                        variant={selectedCategory === null ? 'default' : 'outline'}
+                        className="cursor-pointer"
+                        onClick={() => setSelectedCategory(null)}
+                      >
+                        All
+                      </Badge>
+                    </div>
+                  )}
+
+                  <Card className="p-6">
+                    <Accordion type="single" collapsible className="space-y-2">
+                      {filteredItems.map((faq, index) => (
+                        <AccordionItem key={faq.id} value={`item-${index}`}>
+                          <AccordionTrigger className="text-left">
+                            {faq.name}
+                          </AccordionTrigger>
+                          <AccordionContent className="text-muted-foreground whitespace-pre-line">
+                            <ReactMarkdown>{faq.content}</ReactMarkdown>
+                          </AccordionContent>
+                        </AccordionItem>
+                      ))}
+                    </Accordion>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="articles">
+                  <div className="space-y-6">
+                    {categories.length > 0 && (
+                      <div className="flex gap-2">
+                        {categories.map(category => (
+                          <Badge
+                            key={category}
+                            variant={selectedCategory === category ? 'default' : 'outline'}
+                            className="cursor-pointer"
+                            onClick={() => setSelectedCategory(category)}
+                          >
+                            {category}
+                          </Badge>
                         ))}
-                      </Accordion>
-                    </Card>
-                  </TabsContent>
-                ))}
+                        <Badge
+                          variant={selectedCategory === null ? 'default' : 'outline'}
+                          className="cursor-pointer"
+                          onClick={() => setSelectedCategory(null)}
+                        >
+                          All
+                        </Badge>
+                      </div>
+                    )}
+
+                    {filteredItems.map((article) => (
+                      <Card key={article.id} className="p-6">
+                        <h2 className="text-xl font-semibold mb-2">{article.name}</h2>
+                        {article.category && (
+                          <Badge variant="outline" className="mb-4">
+                            {article.category}
+                          </Badge>
+                        )}
+                        <div className="prose dark:prose-invert max-w-none">
+                          <ReactMarkdown>{article.content}</ReactMarkdown>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                </TabsContent>
               </Tabs>
             </div>
           </main>

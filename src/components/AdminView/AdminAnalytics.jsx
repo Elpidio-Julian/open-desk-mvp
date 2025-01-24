@@ -152,9 +152,44 @@ const AdminAnalytics = () => {
     );
   }
 
-  const formatDuration = (milliseconds) => {
-    const hours = Math.floor(milliseconds / 3600000);
-    const minutes = Math.floor((milliseconds % 3600000) / 60000);
+  const parseInterval = (interval) => {
+    if (!interval) return null;
+    
+    // If already a number, return it
+    if (typeof interval === 'number') return interval;
+    
+    // Convert to string if not already
+    const intervalStr = String(interval);
+    
+    // Handle PostgreSQL interval format
+    let seconds = 0;
+    
+    // Parse days if present
+    const dayMatch = intervalStr.match(/(\d+) day/);
+    if (dayMatch) {
+      seconds += parseInt(dayMatch[1]) * 24 * 3600;
+    }
+    
+    // Parse time component (HH:MM:SS.ms)
+    const timeMatch = intervalStr.match(/(\d{2}):(\d{2}):(\d{2})/);
+    if (timeMatch) {
+      seconds += parseInt(timeMatch[1]) * 3600; // Hours
+      seconds += parseInt(timeMatch[2]) * 60;   // Minutes
+      seconds += parseInt(timeMatch[3]);        // Seconds
+    }
+    
+    return seconds;
+  };
+
+  const formatDuration = (interval) => {
+    if (!interval) return '0h 0m';
+    
+    const seconds = parseInterval(interval);
+    if (seconds === null) return '0h 0m';
+
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+
     return `${hours}h ${minutes}m`;
   };
 

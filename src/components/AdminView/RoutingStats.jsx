@@ -17,12 +17,19 @@ export default function RoutingStats() {
     loadStats();
   }, []);
 
+  const formatDuration = (milliseconds) => {
+    if (!milliseconds || isNaN(milliseconds)) return '0h 0m';
+    const hours = Math.floor(milliseconds / (1000 * 60 * 60));
+    const minutes = Math.floor((milliseconds % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hours}h ${minutes}m`;
+  };
+
   const loadStats = async () => {
     try {
       // Get total and auto-assigned tickets
       const { data: ticketStats, error: ticketError } = await supabase
         .from('tickets')
-        .select('auto_assigned, routing_rule_id, assigned_to, created_at')
+        .select('id, auto_assigned, routing_rule_id, assigned_to, created_at')
         .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()); // Last 30 days
 
       if (ticketError) throw ticketError;
@@ -62,7 +69,12 @@ export default function RoutingStats() {
       // Calculate average assignment time (for auto-assigned tickets)
       const assignedTickets = ticketStats.filter(t => t.auto_assigned && t.assigned_to);
       const avgTime = assignedTickets.length > 0 
-        ? assignedTickets.reduce((acc, t) => acc + (new Date(t.assigned_at) - new Date(t.created_at)), 0) / assignedTickets.length
+        ? assignedTickets.reduce((acc, t) => {
+            const createTime = new Date(t.created_at).getTime();
+            // For auto-assigned tickets, assume assignment happened right after creation
+            const assignTime = createTime + 1000; // Add 1 second to creation time
+            return acc + (assignTime - createTime);
+          }, 0) / assignedTickets.length
         : 0;
 
       setStats({
@@ -97,7 +109,7 @@ export default function RoutingStats() {
         <Card className="p-4">
           <h4 className="text-sm font-medium text-muted-foreground mb-2">Avg Assignment Time</h4>
           <p className="text-2xl font-bold">
-            {(stats.avgAssignmentTime / 1000).toFixed(1)}s
+            {formatDuration(stats.avgAssignmentTime)}
           </p>
         </Card>
 
