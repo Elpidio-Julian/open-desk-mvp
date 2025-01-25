@@ -8,12 +8,12 @@ logger = logging.getLogger(__name__)
 def print_result(test_name: str, result: dict):
     """Pretty print the test results"""
     logger.info(f"\nTest Case: {test_name}")
-    logger.info("=" * 50)
+    logger.info("=" * 80)
     logger.info(f"Input: {result.get('input', 'N/A')}")
-    logger.info("-" * 50)
+    logger.info("-" * 80)
     logger.info("Output:")
     logger.info(result.get('output', 'No output'))
-    logger.info("=" * 50)
+    logger.info("=" * 80)
 
 def run_tests():
     """Run a series of tests on the ticket routing agent"""
@@ -22,20 +22,32 @@ def run_tests():
     
     test_cases = [
         {
-            "name": "Password Reset",
-            "content": "I need to reset my password urgently. I can't log in to my account."
+            "name": "Critical System Outage",
+            "content": "URGENT: The entire production system is down! All users are getting 500 errors. This is severely impacting our business operations and needs immediate attention!"
         },
         {
-            "name": "System Outage",
-            "content": "The entire system is down. None of our users can access it."
+            "name": "Simple Password Reset",
+            "content": "Hi, I forgot my password and need to reset it. This isn't urgent but I'd appreciate help when possible."
         },
         {
-            "name": "Ambiguous Login Issue",
-            "content": "Having trouble logging in. Sometimes it works, sometimes it doesn't."
+            "name": "Security Incident",
+            "content": "CRITICAL SECURITY ALERT: We've detected unauthorized access attempts from multiple IP addresses. Possible breach in progress."
         },
         {
-            "name": "Performance Issue",
-            "content": "The application is running very slowly when processing large files."
+            "name": "Feature Request",
+            "content": "Would it be possible to add dark mode to the dashboard? This would help reduce eye strain when working late."
+        },
+        {
+            "name": "Complex Performance Issue",
+            "content": "The application has been getting progressively slower over the past week. Response times have increased by 300% and we're seeing memory leaks. Multiple microservices are affected."
+        },
+        {
+            "name": "Billing Issue",
+            "content": "Our latest invoice shows charges for services we don't use. Need help reviewing and adjusting the billing statement."
+        },
+        {
+            "name": "Account Management",
+            "content": "Need to add 5 new team members to our enterprise account and set up proper access permissions."
         }
     ]
     
@@ -44,6 +56,8 @@ def run_tests():
     
     for test in test_cases:
         try:
+            logger.info(f"\nProcessing: {test['name']}")
+            logger.info("-" * 80)
             result = agent.process_ticket(test["content"])
             print_result(test["name"], result)
             success_count += 1
@@ -52,9 +66,9 @@ def run_tests():
             logger.error(f"Test case: {test['name']} failed\n")
     
     logger.info("\nTest Summary")
-    logger.info("=" * 50)
+    logger.info("=" * 80)
     logger.info(f"Tests Passed: {success_count}/{total_tests}")
-    logger.info("=" * 50)
+    logger.info("=" * 80)
 
 if __name__ == "__main__":
     run_tests() 
