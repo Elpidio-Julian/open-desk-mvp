@@ -1,0 +1,16 @@
+{
+    "tickets": [
+        {
+            "id": "1",
+            "content": "I need to reset my password for the customer portal",
+            "category": "password_reset",
+            "can_autoresolve": true
+        },
+        {
+            "id": "2",
+            "content": "The system is completely down and no users can access it",
+            "category": "system_outage",
+            "can_autoresolve": false
+        }
+    ]
+} 

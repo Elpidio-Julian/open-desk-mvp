@@ -1,0 +1,17 @@
+ticket_agent/
+├── src/
+│   ├── __init__.py
+│   ├── agent.py          # Main agent implementation
+│   ├── tools/            # Custom tools for ticket handling
+│   │   ├── __init__.py
+│   │   ├── classifier.py # Tool for classifying tickets
+│   │   └── resolver.py   # Tool for resolving tickets
+│   └── utils/           
+│       ├── __init__.py
+│       └── db.py         # Database utilities
+├── tests/
+│   └── __init__.py
+├── data/                 # Training/example data
+│   └── example_tickets.json
+├── requirements.txt
+└── README.md 
