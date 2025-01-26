@@ -173,8 +173,8 @@ const SupportQueue = ({
         aValue = a.creator?.full_name || a.creator?.email;
         bValue = b.creator?.full_name || b.creator?.email;
       } else if (sorting.field === 'assigned_agent') {
-        aValue = a.assigned_agent?.name || '';
-        bValue = b.assigned_agent?.name || '';
+        aValue = a.assigned_agent_id ? 'Assigned' : 'Unassigned';
+        bValue = b.assigned_agent_id ? 'Assigned' : 'Unassigned';
       }
 
       if (aValue === bValue) return 0;
@@ -566,7 +566,7 @@ const SupportQueue = ({
                     {ticket.creator?.full_name || ticket.creator?.email}
                   </TableCell>
                   <TableCell>
-                    {ticket.assigned_agent?.name || 'Unassigned'}
+                    {ticket.assigned_agent_id ? 'Assigned' : 'Unassigned'}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">
@@ -651,12 +651,12 @@ const SupportQueue = ({
                     <Label className="text-right">Assignment</Label>
                     <div className="col-span-3">
                       <Button
-                        variant={ticketDetails.assigned_agent?.id === user.id ? "secondary" : "primary"}
+                        variant={ticketDetails.assigned_agent_id === user.id ? "secondary" : "primary"}
                         onClick={() => handleUpdateTicket({ 
-                          assigned_agent: ticketDetails.assigned_agent?.id === user.id ? null : user.id 
+                          assigned_agent_id: ticketDetails.assigned_agent_id === user.id ? null : user.id 
                         })}
                       >
-                        {ticketDetails.assigned_agent?.id === user.id ? "Unassign" : "Assign to Me"}
+                        {ticketDetails.assigned_agent_id === user.id ? "Unassign" : "Assign to Me"}
                       </Button>
                     </div>
                   </div>

@@ -8,7 +8,7 @@ export const ticketsService = {
     const { custom_fields, title, ...standardFields } = ticketData;
     const ticketWithMetadata = {
       ...standardFields,
-      subject: title, // Map title to subject
+      title,
       metadata: custom_fields || {}
     };
 
@@ -36,19 +36,18 @@ export const ticketsService = {
     let query = supabase
       .from('tickets')
       .select(`
-        id,
-        subject,
-        description,
-        priority,
-        status,
-        metadata,
-        created_at,
-        updated_at,
-        creator_id,
-        assigned_agent_id,
-        creator:profiles(id, full_name, email),
-        assigned_agent:agents(id, name, email),
-        comments(count)
+        *,
+        creator:creator_id(
+          id,
+          full_name,
+          email
+        ),
+        assigned_agent:assigned_agent_id(
+          id,
+          full_name,
+          email
+        ),
+        comments:comments(count)
       `);
 
     // Apply view filters
@@ -79,13 +78,7 @@ export const ticketsService = {
 
     const { data, error } = await query;
     
-    // Map subject to title in response for backward compatibility
-    const mappedData = data?.map(ticket => ({
-      ...ticket,
-      title: ticket.subject
-    }));
-    
-    return { data: mappedData, error };
+    return { data, error };
   },
 
   getByUser: async (userId) => {
@@ -93,7 +86,7 @@ export const ticketsService = {
       .from('tickets')
       .select(`
         id,
-        subject,
+        title,
         description,
         priority,
         status,
@@ -105,13 +98,8 @@ export const ticketsService = {
       `)
       .eq('creator_id', userId);
 
-    // Map subject to title in response for backward compatibility
-    const mappedData = data?.map(ticket => ({
-      ...ticket,
-      title: ticket.subject
-    }));
 
-    return { data: mappedData, error };
+    return { data, error };
   },
 
   getAssigned: async (agentId) => {
@@ -126,29 +114,22 @@ export const ticketsService = {
     const { data, error } = await supabase
       .from('tickets')
       .select(`
-        id,
-        subject,
-        description,
-        priority,
-        status,
-        metadata,
-        created_at,
-        updated_at,
-        creator_id,
-        assigned_agent_id,
-        creator:profiles(id, full_name, email),
-        assigned_agent:agents(id, name, email)
+        *,
+        creator:creator_id(
+          id,
+          full_name,
+          email
+        ),
+        assigned_agent:assigned_agent_id(
+          id,
+          full_name,
+          email
+        )
       `)
       .eq('id', ticketId)
       .single();
 
-    // Map subject to title in response for backward compatibility
-    const mappedData = data ? {
-      ...data,
-      title: data.subject
-    } : null;
-
-    return { data: mappedData, error };
+    return { data, error };
   },
 
   getCustomerHistory: async (customerId) => {
@@ -156,61 +137,29 @@ export const ticketsService = {
       .from('tickets')
       .select(`
         id,
-        subject,
+        title,
         status,
         priority,
         created_at,
-        resolved_at
+        resolved_at,
+        metadata
       `)
       .eq('creator_id', customerId)
       .order('created_at', { ascending: false });
 
-    // Map subject to title in response
-    const mappedData = data?.map(ticket => ({
-      ...ticket,
-      title: ticket.subject
-    }));
-
-    return { data: mappedData, error };
+    return { data, error };
   },
 
   // Update operations
   updateTicket: async (ticketId, updates) => {
-    try {
-      const { data, error } = await supabase
-        .from('tickets')
-        .update(updates)
-        .eq('id', ticketId)
-        .select(`
-          id,
-          subject,
-          description,
-          priority,
-          status,
-          metadata,
-          created_at,
-          updated_at,
-          creator_id,
-          assigned_agent_id,
-          creator:profiles(id, full_name, email),
-          assigned_agent:agents(id, name, email)
-        `)
-        .single();
+    const { data, error } = await supabase
+      .from('tickets')
+      .update(updates)
+      .eq('id', ticketId)
+      .select()
+      .single();
 
-      if (error) throw error;
-      if (!data) throw new Error('No data returned from update');
-
-      // Map subject to title for backward compatibility
-      const mappedData = {
-        ...data,
-        title: data.subject
-      };
-
-      return { data: mappedData, error: null };
-    } catch (error) {
-      console.error('Update ticket error:', error);
-      return { data: null, error };
-    }
+    return { data, error };
   },
 
   // Bulk operations

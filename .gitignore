@@ -30,6 +30,7 @@ dist-ssr
 # dev plans
 /plans/*
 /plans/
+/notes/
 
 ticket_agent/.venv
 
