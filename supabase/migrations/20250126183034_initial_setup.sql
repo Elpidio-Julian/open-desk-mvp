@@ -5,7 +5,7 @@ BEGIN
         CREATE TYPE ticket_priority AS ENUM ('low', 'medium', 'high', 'urgent');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ticket_status') THEN
-        CREATE TYPE ticket_status AS ENUM ('new', 'open', 'pending', 'resolved', 'closed', 'archived');
+        CREATE TYPE ticket_status AS ENUM ('new', 'open', 'pending', 'waiting_on_customer', 'resolved', 'closed', 'archived');
     END IF;
 END $$;
 

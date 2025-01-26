@@ -44,8 +44,10 @@ export const ticketsService = {
         metadata,
         created_at,
         updated_at,
-        creator:profiles!tickets_creator_id_fkey(full_name, email),
-        assigned_agent:profiles!tickets_assigned_agent_id_fkey(full_name, email),
+        creator_id,
+        assigned_agent_id,
+        creator:profiles(id, full_name, email),
+        assigned_agent:agents(id, name, email),
         comments(count)
       `);
 
@@ -134,8 +136,8 @@ export const ticketsService = {
         updated_at,
         creator_id,
         assigned_agent_id,
-        creator:profiles!tickets_creator_id_fkey(id, full_name, email),
-        assigned_agent:agents!tickets_assigned_agent_id_fkey(id, name, email)
+        creator:profiles(id, full_name, email),
+        assigned_agent:agents(id, name, email)
       `)
       .eq('id', ticketId)
       .single();
@@ -190,8 +192,8 @@ export const ticketsService = {
           updated_at,
           creator_id,
           assigned_agent_id,
-          creator:profiles!tickets_creator_id_fkey(id, full_name, email),
-          assigned_agent:agents!tickets_assigned_agent_id_fkey(id, name, email)
+          creator:profiles(id, full_name, email),
+          assigned_agent:agents(id, name, email)
         `)
         .single();
 
@@ -241,7 +243,8 @@ export const ticketsService = {
     return { data, error };
   },
 
-  getComments: async (ticketId) => {
+  // Staff can see all comments including internal notes
+  getStaffComments: async (ticketId) => {
     const { data, error } = await supabase
       .from('comments')
       .select(`
@@ -250,10 +253,30 @@ export const ticketsService = {
         is_internal,
         created_at,
         updated_at,
-        user:profiles!comments_user_id_fkey(id, full_name, email)
+        user:profiles(id, full_name, email)
       `)
       .eq('ticket_id', ticketId)
       .order('created_at', { ascending: true });
+
+    return { data, error };
+  },
+
+  // Customers can only see non-internal comments
+  getCustomerComments: async (ticketId) => {
+    const { data, error } = await supabase
+      .from('comments')
+      .select(`
+        id,
+        content,
+        is_internal,
+        created_at,
+        updated_at,
+        user:profiles(id, full_name, email)
+      `)
+      .eq('ticket_id', ticketId)
+      .eq('is_internal', false)
+      .order('created_at', { ascending: true });
+
     return { data, error };
   },
 

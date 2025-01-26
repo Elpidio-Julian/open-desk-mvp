@@ -53,8 +53,8 @@ const TICKET_VIEWS = {
 };
 
 const TICKET_FILTERS = {
-  STATUS: ['all', 'open', 'in_progress', 'waiting_on_customer', 'resolved', 'closed'],
-  PRIORITY: ['all', 'low', 'medium', 'high', 'urgent'],
+  STATUS: ['all', 'new', 'open', 'pending', 'waiting_on_customer', 'resolved', 'closed', 'archived'],
+  PRIORITY: ['all', 'low', 'medium', 'high', 'urgent']
 };
 
 const TICKET_TABS = {
@@ -153,8 +153,8 @@ const SupportQueue = ({
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(ticket => 
         ticket.title.toLowerCase().includes(query) ||
-        ticket.created_by?.full_name?.toLowerCase().includes(query) ||
-        ticket.created_by?.email?.toLowerCase().includes(query)
+        ticket.creator?.full_name?.toLowerCase().includes(query) ||
+        ticket.creator?.email?.toLowerCase().includes(query)
       );
     }
 
@@ -169,12 +169,12 @@ const SupportQueue = ({
       let bValue = b[sorting.field];
 
       // Handle nested fields
-      if (sorting.field === 'created_by') {
-        aValue = a.created_by?.full_name || a.created_by?.email;
-        bValue = b.created_by?.full_name || b.created_by?.email;
-      } else if (sorting.field === 'assigned_to') {
-        aValue = a.assigned_to?.full_name || '';
-        bValue = b.assigned_to?.full_name || '';
+      if (sorting.field === 'creator') {
+        aValue = a.creator?.full_name || a.creator?.email;
+        bValue = b.creator?.full_name || b.creator?.email;
+      } else if (sorting.field === 'assigned_agent') {
+        aValue = a.assigned_agent?.name || '';
+        bValue = b.assigned_agent?.name || '';
       }
 
       if (aValue === bValue) return 0;
@@ -271,7 +271,7 @@ const SupportQueue = ({
     try {
       const [ticketResponse, commentsResponse] = await Promise.all([
         ticketsService.getTicketDetails(ticketId),
-        ticketsService.getComments(ticketId)
+        ticketsService.getStaffComments(ticketId)
       ]);
 
       if (ticketResponse.error) throw ticketResponse.error;
@@ -280,14 +280,10 @@ const SupportQueue = ({
       setTicketDetails(ticketResponse.data);
       setTicketComments(commentsResponse.data);
 
-      // Fetch customer history if ticket has a creator
-      if (ticketResponse.data.created_by?.id) {
-        const { data: history, error: historyError } = await ticketsService.getCustomerHistory(
-          ticketResponse.data.created_by.id
-        );
-        if (historyError) throw historyError;
-        setCustomerHistory(history);
-      }
+      // Get customer history
+      const { data: history, error: historyError } = await ticketsService.getCustomerHistory(ticketResponse.data.creator_id);
+      if (historyError) throw historyError;
+      setCustomerHistory(history || []);
     } catch (error) {
       setAlert({
         type: 'error',
@@ -390,9 +386,9 @@ const SupportQueue = ({
                     <SelectValue placeholder="Filter by status" />
                   </SelectTrigger>
                   <SelectContent>
-                    {TICKET_FILTERS.STATUS.filter(status => !['resolved', 'closed'].includes(status)).map((status) => (
+                    {TICKET_FILTERS.STATUS.map((status) => (
                       <SelectItem key={status} value={status}>
-                        {status === 'all' ? 'All Statuses' : status.replace('_', ' ')}
+                        {status === 'all' ? 'All Statuses' : status.replace(/_/g, ' ')}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -492,7 +488,7 @@ const SupportQueue = ({
                 <TableHead>
                   <Button
                     variant="ghost"
-                    onClick={() => handleSort('created_by')}
+                    onClick={() => handleSort('creator')}
                     className="flex items-center gap-1"
                   >
                     Customer
@@ -502,7 +498,7 @@ const SupportQueue = ({
                 <TableHead>
                   <Button
                     variant="ghost"
-                    onClick={() => handleSort('assigned_to')}
+                    onClick={() => handleSort('assigned_agent')}
                     className="flex items-center gap-1"
                   >
                     Assigned To
@@ -567,10 +563,10 @@ const SupportQueue = ({
                   </TableCell>
                   <TableCell>{ticket.title}</TableCell>
                   <TableCell>
-                    {ticket.created_by?.full_name || ticket.created_by?.email}
+                    {ticket.creator?.full_name || ticket.creator?.email}
                   </TableCell>
                   <TableCell>
-                    {ticket.assigned_to?.full_name || 'Unassigned'}
+                    {ticket.assigned_agent?.name || 'Unassigned'}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">
@@ -622,7 +618,7 @@ const SupportQueue = ({
                         <SelectContent>
                           {TICKET_FILTERS.STATUS.filter(s => s !== 'all').map((status) => (
                             <SelectItem key={status} value={status}>
-                              {status.replace('_', ' ')}
+                              {status.replace(/_/g, ' ')}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -655,12 +651,12 @@ const SupportQueue = ({
                     <Label className="text-right">Assignment</Label>
                     <div className="col-span-3">
                       <Button
-                        variant={ticketDetails.assigned_to?.id === user.id ? "secondary" : "primary"}
+                        variant={ticketDetails.assigned_agent?.id === user.id ? "secondary" : "primary"}
                         onClick={() => handleUpdateTicket({ 
-                          assigned_to: ticketDetails.assigned_to?.id === user.id ? null : user.id 
+                          assigned_agent: ticketDetails.assigned_agent?.id === user.id ? null : user.id 
                         })}
                       >
-                        {ticketDetails.assigned_to?.id === user.id ? "Unassign" : "Assign to Me"}
+                        {ticketDetails.assigned_agent?.id === user.id ? "Unassign" : "Assign to Me"}
                       </Button>
                     </div>
                   </div>
@@ -668,7 +664,7 @@ const SupportQueue = ({
                   <div className="grid grid-cols-4 items-center gap-4">
                     <Label className="text-right">Customer</Label>
                     <div className="col-span-3">
-                      <p className="text-sm">{ticketDetails.created_by?.full_name || ticketDetails.created_by?.email}</p>
+                      <p className="text-sm">{ticketDetails.creator?.full_name || ticketDetails.creator?.email}</p>
                     </div>
                   </div>
 
@@ -703,39 +699,20 @@ const SupportQueue = ({
 
                   {showHistory && customerHistory.length > 0 && (
                     <div className="border rounded-md p-4 bg-muted/50">
-                      <h4 className="font-medium mb-3">Customer History</h4>
-                      <div className="space-y-3 max-h-[200px] overflow-y-auto pr-2">
+                      <h4 className="font-medium mb-2">Customer History</h4>
+                      <div className="space-y-2">
                         {customerHistory.map((ticket) => (
                           <div
                             key={ticket.id}
-                            className={`p-3 rounded-md ${
-                              ticket.id === ticketDetails.id ? 'bg-blue-50 border border-blue-200' : 'bg-background'
-                            }`}
+                            className="text-sm p-2 rounded bg-background cursor-pointer hover:bg-accent"
+                            onClick={() => handleTicketClick(ticket)}
                           >
                             <div className="flex justify-between items-start">
-                              <div className="flex-1">
-                                <h4 className="text-sm font-medium">{ticket.title}</h4>
-                                <div className="flex gap-4 mt-1 text-xs text-muted-foreground">
-                                  <span>Status: {ticket.status}</span>
-                                  <span>Priority: {ticket.priority}</span>
-                                  <span>Created: {new Date(ticket.created_at).toLocaleDateString()}</span>
-                                  {ticket.resolved_at && (
-                                    <span>Resolved: {new Date(ticket.resolved_at).toLocaleDateString()}</span>
-                                  )}
-                                </div>
-                              </div>
-                              {ticket.id !== ticketDetails.id && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleTicketClick({ id: ticket.id });
-                                  }}
-                                >
-                                  View
-                                </Button>
-                              )}
+                              <span className="font-medium">{ticket.title}</span>
+                              <Badge variant="outline">{ticket.status.replace(/_/g, ' ')}</Badge>
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              Created: {new Date(ticket.created_at).toLocaleString()}
                             </div>
                           </div>
                         ))}
@@ -759,7 +736,7 @@ const SupportQueue = ({
                               <div className="flex justify-between items-start">
                                 <div>
                                   <span className="text-sm font-medium">
-                                    {comment.user_id === ticketDetails.created_by.id ? (
+                                    {comment.user_id === ticketDetails.creator_id ? (
                                       comment.user?.full_name || comment.user?.email
                                     ) : (
                                       <span className="text-primary">

@@ -101,7 +101,7 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
     try {
       const [ticketResponse, commentsResponse] = await Promise.all([
         ticketsService.getTicketDetails(ticketId),
-        ticketsService.getComments(ticketId)
+        ticketsService.getCustomerComments(ticketId)
       ]);
 
       if (ticketResponse.error) throw ticketResponse.error;
