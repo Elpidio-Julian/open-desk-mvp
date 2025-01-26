@@ -30,4 +30,8 @@ dist-ssr
 # dev plans
 /plans/*
 
-ticket_agent/.venv
+ticket_agent/.venv__pycache__/
+
+# Python cache files
+__pycache__/
+*.py[cod]
