@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     status ticket_status DEFAULT 'new',
     creator_id UUID NOT NULL REFERENCES profiles(id),
     assigned_agent_id UUID REFERENCES agents(id),
+    metadata JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -15,6 +16,7 @@ CREATE TABLE IF NOT EXISTS tickets (
 CREATE INDEX IF NOT EXISTS tickets_assigned_agent_id_idx ON tickets(assigned_agent_id);
 CREATE INDEX IF NOT EXISTS tickets_creator_id_idx ON tickets(creator_id);
 CREATE INDEX IF NOT EXISTS tickets_status_idx ON tickets(status);
+CREATE INDEX IF NOT EXISTS tickets_metadata_gin_idx ON tickets USING GIN (metadata);
 
 -- Create updated_at trigger for tickets
 CREATE TRIGGER update_tickets_updated_at 

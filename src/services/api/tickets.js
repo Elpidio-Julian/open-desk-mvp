@@ -4,9 +4,17 @@ import { routingService } from './routing';
 export const ticketsService = {
   // Create operations
   create: async (ticketData) => {
+    // Extract custom fields into metadata and rename title to subject
+    const { custom_fields, title, ...standardFields } = ticketData;
+    const ticketWithMetadata = {
+      ...standardFields,
+      subject: title, // Map title to subject
+      metadata: custom_fields || {}
+    };
+
     const { data: ticket, error } = await supabase
       .from('tickets')
-      .insert([ticketData])
+      .insert([ticketWithMetadata])
       .select()
       .single();
 
@@ -24,23 +32,30 @@ export const ticketsService = {
   },
 
   // Read operations
-  getTickets: async ({ view, status, priority, userId }) => {
+  getTickets: async ({ view, status, priority, userId, customFieldFilters = {} }) => {
     let query = supabase
       .from('tickets')
       .select(`
-        *,
-        created_by:users!tickets_created_by_fkey(full_name, email),
-        assigned_to:users!tickets_assigned_to_fkey(full_name, email),
+        id,
+        subject,
+        description,
+        priority,
+        status,
+        metadata,
+        created_at,
+        updated_at,
+        creator:profiles!tickets_creator_id_fkey(full_name, email),
+        assigned_agent:profiles!tickets_assigned_agent_id_fkey(full_name, email),
         comments(count)
       `);
 
     // Apply view filters
     switch (view) {
       case 'unassigned':
-        query = query.is('assigned_to', null);
+        query = query.is('assigned_agent_id', null);
         break;
       case 'my_tickets':
-        query = query.eq('assigned_to', userId);
+        query = query.eq('assigned_agent_id', userId);
         break;
       case 'urgent':
         query = query.eq('priority', 'urgent');
@@ -51,27 +66,57 @@ export const ticketsService = {
     if (status) query = query.eq('status', status);
     if (priority) query = query.eq('priority', priority);
 
+    // Apply custom field filters
+    Object.entries(customFieldFilters).forEach(([field, value]) => {
+      query = query.contains('metadata', { [field]: value });
+    });
+
     // Apply sorting
     query = query.order('priority', { ascending: false })
                 .order('created_at', { ascending: false });
 
     const { data, error } = await query;
-    return { data, error };
+    
+    // Map subject to title in response for backward compatibility
+    const mappedData = data?.map(ticket => ({
+      ...ticket,
+      title: ticket.subject
+    }));
+    
+    return { data: mappedData, error };
   },
 
   getByUser: async (userId) => {
     const { data, error } = await supabase
       .from('tickets')
-      .select('*')
-      .eq('created_by', userId);
-    return { data, error };
+      .select(`
+        id,
+        subject,
+        description,
+        priority,
+        status,
+        metadata,
+        created_at,
+        updated_at,
+        creator_id,
+        assigned_agent_id
+      `)
+      .eq('creator_id', userId);
+
+    // Map subject to title in response for backward compatibility
+    const mappedData = data?.map(ticket => ({
+      ...ticket,
+      title: ticket.subject
+    }));
+
+    return { data: mappedData, error };
   },
 
   getAssigned: async (agentId) => {
     const { data, error } = await supabase
       .from('tickets')
       .select('*')
-      .eq('assigned_to', agentId);
+      .eq('assigned_agent_id', agentId);
     return { data, error };
   },
 
@@ -79,13 +124,29 @@ export const ticketsService = {
     const { data, error } = await supabase
       .from('tickets')
       .select(`
-        *,
-        created_by:users!tickets_created_by_fkey(id, full_name, email),
-        assigned_to:users!tickets_assigned_to_fkey(id, full_name, email)
+        id,
+        subject,
+        description,
+        priority,
+        status,
+        metadata,
+        created_at,
+        updated_at,
+        creator_id,
+        assigned_agent_id,
+        creator:profiles!tickets_creator_id_fkey(id, full_name, email),
+        assigned_agent:agents!tickets_assigned_agent_id_fkey(id, name, email)
       `)
       .eq('id', ticketId)
       .single();
-    return { data, error };
+
+    // Map subject to title in response for backward compatibility
+    const mappedData = data ? {
+      ...data,
+      title: data.subject
+    } : null;
+
+    return { data: mappedData, error };
   },
 
   getCustomerHistory: async (customerId) => {
@@ -93,48 +154,68 @@ export const ticketsService = {
       .from('tickets')
       .select(`
         id,
-        title,
+        subject,
         status,
         priority,
         created_at,
         resolved_at
       `)
-      .eq('created_by', customerId)
+      .eq('creator_id', customerId)
       .order('created_at', { ascending: false });
-    return { data, error };
+
+    // Map subject to title in response
+    const mappedData = data?.map(ticket => ({
+      ...ticket,
+      title: ticket.subject
+    }));
+
+    return { data: mappedData, error };
   },
 
   // Update operations
   updateTicket: async (ticketId, updates) => {
-    // If status is changing to 'open' and ticket is unassigned, try auto-assignment
-    if (updates.status === 'open' && !updates.assigned_to) {
-      try {
-        const agent = await routingService.autoAssignTicket(ticketId);
-        if (agent) {
-          updates.assigned_to = agent.id;
-        }
-      } catch (routingError) {
-        console.error('Auto-assignment failed:', routingError);
-        // Continue with update even if auto-assignment fails
-      }
+    try {
+      const { data, error } = await supabase
+        .from('tickets')
+        .update(updates)
+        .eq('id', ticketId)
+        .select(`
+          id,
+          subject,
+          description,
+          priority,
+          status,
+          metadata,
+          created_at,
+          updated_at,
+          creator_id,
+          assigned_agent_id,
+          creator:profiles!tickets_creator_id_fkey(id, full_name, email),
+          assigned_agent:agents!tickets_assigned_agent_id_fkey(id, name, email)
+        `)
+        .single();
+
+      if (error) throw error;
+      if (!data) throw new Error('No data returned from update');
+
+      // Map subject to title for backward compatibility
+      const mappedData = {
+        ...data,
+        title: data.subject
+      };
+
+      return { data: mappedData, error: null };
+    } catch (error) {
+      console.error('Update ticket error:', error);
+      return { data: null, error };
     }
-
-    const { data, error } = await supabase
-      .from('tickets')
-      .update(updates)
-      .eq('id', ticketId)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
   },
 
   // Bulk operations
   bulkAssign: async (ticketIds, agentId) => {
     const { data, error } = await supabase
       .from('tickets')
-      .update({ assigned_to: agentId })
+      .update({ assigned_agent_id: agentId })
       .in('id', ticketIds);
     return { data, error };
   },
@@ -164,13 +245,62 @@ export const ticketsService = {
     const { data, error } = await supabase
       .from('comments')
       .select(`
-        *,
-        user:users(full_name, email)
+        id,
+        content,
+        is_internal,
+        created_at,
+        updated_at,
+        user:profiles!comments_user_id_fkey(id, full_name, email)
       `)
       .eq('ticket_id', ticketId)
       .order('created_at', { ascending: true });
     return { data, error };
-  }
+  },
+
+  // Custom field operations
+  getCustomFields: async () => {
+    const { data, error } = await supabase
+      .from('custom_field_definitions')
+      .select('*')
+      .eq('is_active', true)
+      .order('display_order', { ascending: true });
+    
+    return { data, error };
+  },
+
+  isIssueCategoryEnabled: async () => {
+    try {
+      const { data, error } = await supabase
+        .from('custom_field_definitions')
+        .select('*')
+        .eq('name', 'Issue Category')
+        .eq('is_active', true)
+        .single();
+
+      if (error && error.code !== 'PGRST116') throw error;
+      return !!data;
+    } catch (error) {
+      console.error('Error checking issue category status:', error);
+      return false;
+    }
+  },
+
+  getIssueCategories: async () => {
+    try {
+      const { data, error } = await supabase
+        .from('custom_field_definitions')
+        .select('options')
+        .eq('name', 'Issue Category')
+        .eq('is_active', true)
+        .single();
+
+      if (error) throw error;
+      return data?.options || [];
+    } catch (error) {
+      console.error('Error fetching issue categories:', error);
+      return [];
+    }
+  },
 };
 
 /**
@@ -178,7 +308,7 @@ export const ticketsService = {
  */
 async function bulkUpdateTickets(ticketIds, updates) {
   // For each unassigned ticket being set to 'open', try auto-assignment
-  if (updates.status === 'open' && !updates.assigned_to) {
+  if (updates.status === 'open' && !updates.assigned_agent_id) {
     await Promise.all(ticketIds.map(async (ticketId) => {
       try {
         const agent = await routingService.autoAssignTicket(ticketId);
@@ -186,7 +316,7 @@ async function bulkUpdateTickets(ticketIds, updates) {
           // Update individual ticket with assignment
           await supabase
             .from('tickets')
-            .update({ ...updates, assigned_to: agent.id })
+            .update({ ...updates, assigned_agent_id: agent.id })
             .eq('id', ticketId);
           return;
         }

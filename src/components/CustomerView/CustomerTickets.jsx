@@ -24,7 +24,7 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
 import { Alert, AlertDescription } from "../ui/alert";
-import { customersService } from '../../services/api/customers';
+import { ticketsService } from '../../services/api/tickets';
 import {
   Select,
   SelectContent,
@@ -86,7 +86,7 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
 
   const fetchTickets = async () => {
     try {
-      const { data, error } = await customersService.getTickets(user.id);
+      const { data, error } = await ticketsService.getByUser(user.id);
       if (error) throw error;
       setTickets(data);
     } catch (error) {
@@ -100,8 +100,8 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
   const fetchTicketDetails = async (ticketId) => {
     try {
       const [ticketResponse, commentsResponse] = await Promise.all([
-        customersService.getTicketDetails(ticketId, user.id),
-        customersService.getTicketComments(ticketId)
+        ticketsService.getTicketDetails(ticketId),
+        ticketsService.getComments(ticketId)
       ]);
 
       if (ticketResponse.error) throw ticketResponse.error;
@@ -124,10 +124,10 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
   };
 
   const checkIssueCategories = async () => {
-    const enabled = await customersService.isIssueCategoryEnabled();
+    const enabled = await ticketsService.isIssueCategoryEnabled();
     setIsCategoryEnabled(enabled);
     if (enabled) {
-      const categories = await customersService.getIssueCategories();
+      const categories = await ticketsService.getIssueCategories();
       setIssueCategories(categories);
     }
   };
@@ -142,15 +142,13 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
         return;
       }
 
-      const { data, error } = await customersService.createTicket({
+      const ticket = await ticketsService.create({
         title: newTicket.title,
         description: newTicket.description,
         priority: newTicket.priority,
-        created_by: user.id,
+        creator_id: user.id,
         custom_fields: newTicket.custom_fields
       });
-
-      if (error) throw new Error(error);
 
       setAlert({
         type: 'success',
@@ -177,7 +175,7 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
 
     setIsSubmittingComment(true);
     try {
-      const { error } = await customersService.addComment(
+      const { error } = await ticketsService.addComment(
         selectedTicket.id,
         user.id,
         newComment.trim()
@@ -198,7 +196,7 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
 
   const handleResolveTicket = async () => {
     try {
-      const { error } = await customersService.updateTicket(selectedTicket.id, {
+      const { error } = await ticketsService.updateTicket(selectedTicket.id, {
         status: 'resolved'
       });
 
@@ -227,27 +225,34 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
 
   const handleSubmitFeedback = async () => {
     try {
-      // Update ticket status to closed
-      const { error: updateError } = await customersService.updateTicket(selectedTicket.id, {
+      // Update ticket status to closed and add feedback to metadata
+      const { data: updatedTicket, error: updateError } = await ticketsService.updateTicket(selectedTicket.id, {
         status: 'closed',
-        feedback_rating: parseInt(feedback.rating),
-        feedback_comment: feedback.comment
+        metadata: {
+          ...(selectedTicket.metadata || {}),
+          feedback: {
+            rating: feedback.rating,
+            comment: feedback.comment || ''
+          }
+        }
       });
 
       if (updateError) throw updateError;
+      if (!updatedTicket) throw new Error('Failed to update ticket');
+
+      console.log('Updated ticket:', updatedTicket); // Debug log
+
+      if (!updatedTicket?.metadata?.feedback) {
+        throw new Error('Feedback was not saved correctly');
+      }
 
       setAlert({
         type: 'success',
         message: 'Thank you for your feedback!'
       });
       
-      // Update the selected ticket locally
-      setSelectedTicket({
-        ...selectedTicket,
-        status: 'closed',
-        feedback_rating: parseInt(feedback.rating),
-        feedback_comment: feedback.comment
-      });
+      // Update the selected ticket locally with the response from the server
+      setSelectedTicket(updatedTicket);
       
       // Reset feedback form
       setFeedback({ rating: '5', comment: '' });
@@ -256,6 +261,7 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
       // Refresh tickets list
       fetchTickets();
     } catch (error) {
+      console.error('Feedback submission error:', error); // Debug log
       setAlert({
         type: 'error',
         message: 'Failed to submit feedback: ' + error.message
