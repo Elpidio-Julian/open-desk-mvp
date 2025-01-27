@@ -3,67 +3,130 @@ import { supabase } from '../supabase';
 export const teamsService = {
   // Team operations
   listTeams: async () => {
-    const { data, error } = await supabase.rpc('list_teams');
+    const { data, error } = await supabase
+      .from('teams')
+      .select(`
+        *,
+        agents:agents(*)
+      `)
+      .order('name');
+    
+    if (data) {
+      // Transform data to include counts
+      data.forEach(team => {
+        team.member_count = team.agents?.length || 0;
+        team.skill_count = team.skills?.length || 0;
+      });
+    }
+
     return { data, error };
   },
 
   createTeam: async ({ name, focusArea }) => {
-    const { data, error } = await supabase.rpc('create_team', {
-      team_name: name,
-      team_focus_area: focusArea
-    });
+    const { data, error } = await supabase
+      .from('teams')
+      .insert({
+        name,
+        focus_area: focusArea
+      })
+      .select()
+      .single();
+
     return { data, error };
   },
 
   updateTeam: async (teamId, { name, focusArea }) => {
-    const { data, error } = await supabase.rpc('update_team', {
-      team_id: teamId,
-      new_name: name,
-      new_focus_area: focusArea
-    });
+    const { data, error } = await supabase
+      .from('teams')
+      .update({
+        name,
+        focus_area: focusArea
+      })
+      .eq('id', teamId)
+      .select()
+      .single();
+
     return { data, error };
   },
 
   deleteTeam: async (teamId) => {
-    const { data, error } = await supabase.rpc('delete_team', {
-      team_id: teamId
-    });
-    return { data, error };
+    const { error } = await supabase
+      .from('teams')
+      .delete()
+      .eq('id', teamId);
+
+    return { error };
   },
 
   getTeamDetails: async (teamId) => {
-    const { data, error } = await supabase.rpc('get_team_details', {
-      team_id: teamId
-    });
-    return { data, error };
+    const { data, error } = await supabase
+      .from('teams')
+      .select(`
+        *,
+        agents:agents(
+          id,
+          full_name,
+          email,
+          role
+        )
+      `)
+      .eq('id', teamId)
+      .single();
+
+    if (data) {
+      return {
+        data: {
+          team: {
+            id: data.id,
+            name: data.name,
+            focus_area: data.focus_area
+          },
+          members: data.agents || [],
+          skills: data.skills || []
+        },
+        error: null
+      };
+    }
+
+    return { data: null, error };
   },
 
   // Team member operations
   getTeamMembers: async (teamId) => {
     const { data, error } = await supabase
-      .from('team_members')
+      .from('agents')
       .select(`
         *,
-        profiles:user_id (*)
+        profile:profile_id (
+          id,
+          full_name,
+          email,
+          role
+        )
       `)
       .eq('team_id', teamId);
     return { data, error };
   },
 
-  addTeamMember: async (teamId, userId) => {
-    const { data, error } = await supabase.rpc('add_team_member', {
-      team_id: teamId,
-      user_id: userId
-    });
+  addTeamMember: async (teamId, profileId) => {
+    const { data, error } = await supabase
+      .from('agents')
+      .insert({
+        team_id: teamId,
+        profile_id: profileId
+      })
+      .select()
+      .single();
     return { data, error };
   },
 
-  removeTeamMember: async (teamId, userId) => {
-    const { data, error } = await supabase.rpc('remove_team_member', {
-      team_id: teamId,
-      user_id: userId
-    });
-    return { data, error };
+  removeTeamMember: async (teamId, profileId) => {
+    const { error } = await supabase
+      .from('agents')
+      .delete()
+      .eq('team_id', teamId)
+      .eq('profile_id', profileId);
+    return { error };
   },
 
   // Team skills operations
@@ -85,17 +148,16 @@ export const teamsService = {
 
   // Agent operations for teams
   getAvailableAgents: async (teamId, search = '') => {
-    // First get team members to exclude
-    const { data: teamMembers } = await supabase
-      .from('team_members')
-      .select('user_id')
-      .eq('team_id', teamId);
-
-    // Build the query
+    // Get agents not already in the team
     let query = supabase
-      .from('users')
+      .from('profiles')
       .select('id, full_name, email, role')
-      .eq('role', 'agent')
+      .in('role', ['agent', 'admin'])
+      .not('id', 'in', (qb) => 
+        qb.from('agents')
+          .select('profile_id')
+          .eq('team_id', teamId)
+      )
       .order('full_name');
 
     // Add search filter if provided
@@ -103,13 +165,6 @@ export const teamsService = {
       query = query.ilike('full_name', `%${search}%`);
     }
 
-    // Add exclusion filter if there are team members
-    if (teamMembers && teamMembers.length > 0) {
-      const memberIds = teamMembers.map(tm => tm.user_id);
-      query = query.not('id', 'in', `(${memberIds.join(',')})`);
-    }
-
-    // Execute query
     const { data, error } = await query;
     return { data, error, count: data?.length || 0 };
   }

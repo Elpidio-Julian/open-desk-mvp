@@ -56,7 +56,7 @@ const TeamManagement = () => {
 
       setTeams(teamsData || []);
 
-      // Fetch agents for each team
+      // Fetch available agents for each team
       await Promise.all((teamsData || []).map(team => fetchAgentsForTeam(team.id)));
     } catch (err) {
       console.error('Error:', err);
@@ -108,10 +108,10 @@ const TeamManagement = () => {
     }
   };
 
-  const addMemberToTeam = async (teamId, userId) => {
+  const addMemberToTeam = async (teamId, profileId) => {
     try {
       setError(null);
-      const { error } = await teamsService.addTeamMember(teamId, userId);
+      const { error } = await teamsService.addTeamMember(teamId, profileId);
       if (error) throw error;
       
       setSelectedAgents(prev => ({ ...prev, [teamId]: '' }));
@@ -176,10 +176,10 @@ const TeamManagement = () => {
     }
   };
 
-  const removeMemberFromTeam = async (teamId, userId) => {
+  const removeMemberFromTeam = async (teamId, profileId) => {
     try {
       setError(null);
-      const { error } = await teamsService.removeTeamMember(teamId, userId);
+      const { error } = await teamsService.removeTeamMember(teamId, profileId);
       if (error) throw error;
       await fetchTeamsAndAgents();
       if (selectedTeam?.team.id === teamId) {
@@ -381,13 +381,13 @@ const TeamManagement = () => {
                 {selectedTeam.members?.map((member) => (
                   <div key={member.id} className="flex justify-between items-center">
                     <div>
-                      <p className="font-medium">{member.full_name}</p>
-                      <p className="text-sm text-muted-foreground">{member.email}</p>
+                      <p className="font-medium">{member.profile.full_name}</p>
+                      <p className="text-sm text-muted-foreground">{member.profile.email}</p>
                     </div>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => removeMemberFromTeam(selectedTeam.team.id, member.id)}
+                      onClick={() => removeMemberFromTeam(selectedTeam.team.id, member.profile.id)}
                     >
                       Remove
                     </Button>
