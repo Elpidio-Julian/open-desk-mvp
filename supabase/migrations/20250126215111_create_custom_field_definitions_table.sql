@@ -1,5 +1,5 @@
 -- Create enum for field types
-CREATE TYPE field_type AS ENUM ('text', 'number', 'boolean', 'date', 'select', 'multi-select');
+CREATE TYPE field_type AS ENUM ('text', 'number', 'boolean', 'metadata', 'select', 'multi-select', 'date');
 
 -- Create enum for content types
 CREATE TYPE content_type AS ENUM ('faqs', 'articles', 'routing_rules', 'field');
@@ -27,7 +27,11 @@ CREATE POLICY "Allow read access to all users" ON custom_field_definitions
   FOR SELECT USING (true);
 
 CREATE POLICY "Allow all access to admins" ON custom_field_definitions
-  FOR ALL USING (auth.jwt() ->> 'role' = 'admin');
+  FOR ALL USING (EXISTS (
+    SELECT 1 FROM profiles 
+    WHERE profiles.id = auth.uid() 
+    AND profiles.role = 'admin'
+  ));
 
 -- Create updated_at trigger
 CREATE TRIGGER set_custom_field_definitions_updated_at
@@ -35,23 +39,23 @@ CREATE TRIGGER set_custom_field_definitions_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
--- Insert default issue category field
-INSERT INTO custom_field_definitions (
-    name,
-    description,
-    content_type,
-    field_type,
-    options,
-    is_required,
-    is_active,
-    display_order
-) VALUES (
-    'Issue Category',
-    'Category of the support ticket',
-    'field',
-    'select',
-    '["Account Access", "Billing", "Technical Issue", "Feature Request", "Bug Report", "General Inquiry"]',
-    true,
-    true,
-    1
-) ON CONFLICT (name) DO NOTHING;
+-- -- Insert default issue category field
+-- INSERT INTO custom_field_definitions (
+--     name,
+--     description,
+--     content_type,
+--     field_type,
+--     options,
+--     is_required,
+--     is_active,
+--     display_order
+-- ) VALUES (
+--     'Issue Category',
+--     'Category of the support ticket',
+--     'field',
+--     'select',
+--     '["Account Access", "Billing", "Technical Issue", "Feature Request", "Bug Report", "General Inquiry"]',
+--     true,
+--     true,
+--     1
+-- ) ON CONFLICT (name) DO NOTHING;

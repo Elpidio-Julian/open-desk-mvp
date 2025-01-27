@@ -13,7 +13,7 @@ import { Label } from "../ui/label";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Switch } from "../ui/switch";
-import { Pencil, Trash2, Plus } from "lucide-react";
+import { Pencil, Trash2, Plus, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -23,26 +23,68 @@ import {
   DialogFooter,
 } from "../ui/dialog";
 import { supabase } from '../../services/supabase';
+import { customFieldsService } from '../../services/api/customFields';
+
+const PREDEFINED_FIELDS = {
+  'Issue Category': {
+    fieldType: 'select',
+    description: 'Categories for classifying support tickets',
+    contentType: 'field',
+    isRequired: true
+  },
+  'Agent Tags': {
+    fieldType: 'metadata',
+    description: 'Tags for classifying and filtering agents',
+    contentType: 'field',
+    isRequired: false
+  },
+  'Team Tags': {
+    fieldType: 'metadata',
+    description: 'Tags for classifying and filtering teams',
+    contentType: 'field',
+    isRequired: false
+  },
+  'Focus Areas': {
+    fieldType: 'metadata',
+    description: 'Areas of expertise or responsibility for teams',
+    contentType: 'field',
+    isRequired: false
+  },
+  'Team Skills': {
+    fieldType: 'metadata',
+    description: 'Skills and capabilities associated with teams',
+    contentType: 'field',
+    isRequired: false
+  },
+  'Agent Skills': {
+    fieldType: 'metadata',
+    description: 'Skills and capabilities of agents',
+    contentType: 'field',
+    isRequired: false
+  }
+};
 
 export default function CustomFieldsManager() {
   const [fields, setFields] = useState([]);
-  const [alert, setAlert] = useState(null);
+  const [error, setError] = useState(null);
   const [editingField, setEditingField] = useState(null);
   const [deleteConfirmField, setDeleteConfirmField] = useState(null);
   const [issueCategoriesEnabled, setIssueCategoriesEnabled] = useState(false);
   const [newField, setNewField] = useState({
     name: '',
-    field_type: 'text',
-    is_required: false,
-    options: []
+    description: '',
+    fieldType: '',
+    options: [],
+    isRequired: false,
+    isActive: true
   });
   const [newOption, setNewOption] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [newKeyValue, setNewKeyValue] = useState({ key: '', value: '' });
+  const [editKeyValue, setEditKeyValue] = useState({ key: '', value: '' });
 
   const FIELD_TYPES = [
-    { value: 'text', label: 'Text' },
-    { value: 'number', label: 'Number' },
-    { value: 'date', label: 'Date' },
-    { value: 'boolean', label: 'Yes/No' },
+    { value: 'metadata', label: 'Metadata' },
     { value: 'select', label: 'Select' }
   ];
 
@@ -55,182 +97,197 @@ export default function CustomFieldsManager() {
   ];
 
   useEffect(() => {
-    loadFields();
+    fetchFields();
     checkIssueCategoriesEnabled();
   }, []);
 
   const checkIssueCategoriesEnabled = async () => {
     try {
-      const { data, error } = await supabase
-        .from('custom_field_definitions')
-        .select('*')
-        .eq('name', 'Issue Category')
-        .single();
-
+      const { data, error } = await customFieldsService.getFieldByName('Issue Category');
       if (error && error.code !== 'PGRST116') throw error;
       setIssueCategoriesEnabled(!!data);
-    } catch (error) {
-      setAlert({
-        type: 'error',
-        message: 'Failed to check issue categories status: ' + error.message
-      });
+    } catch (err) {
+      console.error('Error checking issue categories:', err);
+      setError(err.message);
     }
   };
 
   const handleToggleIssueCategories = async (enabled) => {
     try {
+      setLoading(true);
       if (enabled) {
-        // Create the Issue Category field
-        const { error } = await supabase
-          .from('custom_field_definitions')
-          .insert([{
-            name: 'Issue Category',
-            field_type: 'select',
-            is_required: true,
-            options: DEFAULT_CATEGORIES
-          }]);
-
-        if (error) throw error;
-
-        setAlert({
-          type: 'success',
-          message: 'Issue categories enabled successfully!'
+        const { error } = await customFieldsService.createField({
+          name: 'Issue Category',
+          description: 'Category of the support ticket',
+          contentType: 'field',
+          fieldType: 'select',
+          options: DEFAULT_CATEGORIES,
+          isRequired: true,
+          isActive: true
         });
+        if (error) throw error;
       } else {
-        // Find and delete the Issue Category field
-        const { data: categoryField } = await supabase
-          .from('custom_field_definitions')
-          .select('id')
-          .eq('name', 'Issue Category')
-          .single();
-
+        const { data: categoryField } = await customFieldsService.getFieldByName('Issue Category');
         if (categoryField) {
-          const { error } = await supabase
-            .from('custom_field_definitions')
-            .delete()
-            .eq('id', categoryField.id);
-
+          const { error } = await customFieldsService.deleteField(categoryField.id);
           if (error) throw error;
         }
-
-        setAlert({
-          type: 'success',
-          message: 'Issue categories disabled successfully!'
-        });
       }
 
       setIssueCategoriesEnabled(enabled);
-      loadFields();
-    } catch (error) {
-      setAlert({
-        type: 'error',
-        message: 'Failed to toggle issue categories: ' + error.message
-      });
+      await fetchFields();
+    } catch (err) {
+      console.error('Error toggling issue categories:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const loadFields = async () => {
+  const fetchFields = async () => {
     try {
-      const { data, error } = await supabase
-        .from('custom_field_definitions')
-        .select('*')
-        .eq('content_type', 'field')  // Only fetch regular custom fields
-        .order('name');
-
+      setLoading(true);
+      setError(null);
+      const { data, error } = await customFieldsService.listFields();
       if (error) throw error;
       setFields(data || []);
-    } catch (error) {
-      setAlert({
-        type: 'error',
-        message: 'Failed to load custom fields: ' + error.message
+    } catch (err) {
+      console.error('Error fetching fields:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleNameChange = (value) => {
+    const predefinedField = PREDEFINED_FIELDS[value];
+    if (predefinedField) {
+      setNewField({
+        ...newField,
+        name: value,
+        fieldType: predefinedField.fieldType,
+        description: predefinedField.description,
+        contentType: predefinedField.contentType,
+        isRequired: predefinedField.isRequired
       });
     }
   };
 
-  const handleCreateField = async () => {
-    try {
-      const { error } = await supabase
-        .from('custom_field_definitions')
-        .insert([{
-          name: newField.name,
-          field_type: newField.field_type,
-          is_required: newField.is_required,
-          options: newField.field_type === 'select' ? newField.options : null
-        }]);
+  // Get available field names (not yet created)
+  const getAvailableFieldNames = () => {
+    const existingFieldNames = new Set(fields.map(field => field.name));
+    return Object.keys(PREDEFINED_FIELDS).filter(name => !existingFieldNames.has(name));
+  };
 
+  const createField = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Prepare options based on field type
+      let processedOptions = null;
+      if (newField.fieldType === 'select') {
+        processedOptions = newField.options;
+      } else if (newField.fieldType === 'metadata') {
+        // Convert key-value pairs to object
+        processedOptions = newField.options.reduce((acc, pair) => {
+          acc[pair.key] = pair.value;
+          return acc;
+        }, {});
+      }
+
+      const fieldData = {
+        ...newField,
+        options: processedOptions
+      };
+
+      const { error } = await customFieldsService.createField(fieldData);
       if (error) throw error;
 
-      setAlert({
-        type: 'success',
-        message: 'Custom field created successfully!'
-      });
-      
+      await fetchFields();
       setNewField({
         name: '',
-        field_type: 'text',
-        is_required: false,
-        options: []
+        description: '',
+        fieldType: '',
+        options: [],
+        isRequired: false,
+        isActive: true
       });
-      
-      loadFields();
-    } catch (error) {
-      setAlert({
-        type: 'error',
-        message: 'Failed to create custom field: ' + error.message
+    } catch (err) {
+      console.error('Error creating field:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditField = (field) => {
+    // Convert options object to array of key-value pairs for metadata fields
+    if (field.field_type === 'metadata' && field.options) {
+      const optionsArray = Object.entries(field.options).map(([key, value]) => ({
+        key,
+        value: value.toString()
+      }));
+      setEditingField({
+        ...field,
+        options: optionsArray
       });
+    } else {
+      setEditingField(field);
     }
   };
 
   const handleUpdateField = async () => {
     try {
-      const { error } = await supabase
-        .from('custom_field_definitions')
-        .update({
-          name: editingField.name,
-          field_type: editingField.field_type,
-          is_required: editingField.is_required,
-          options: editingField.field_type === 'select' ? editingField.options : null
-        })
-        .eq('id', editingField.id);
+      setLoading(true);
+      setError(null);
+
+      // Prepare options based on field type
+      let processedOptions = null;
+      if (editingField.field_type === 'select') {
+        processedOptions = editingField.options;
+      } else if (editingField.field_type === 'metadata') {
+        // Convert key-value pairs to object
+        processedOptions = editingField.options.reduce((acc, pair) => {
+          acc[pair.key] = pair.value;
+          return acc;
+        }, {});
+      }
+
+      const { error } = await customFieldsService.updateField(editingField.id, {
+        name: editingField.name,
+        description: editingField.description,
+        field_type: editingField.field_type,
+        options: processedOptions,
+        is_required: editingField.is_required,
+        is_active: editingField.is_active
+      });
 
       if (error) throw error;
-
-      setAlert({
-        type: 'success',
-        message: 'Custom field updated successfully!'
-      });
       
       setEditingField(null);
-      loadFields();
-    } catch (error) {
-      setAlert({
-        type: 'error',
-        message: 'Failed to update custom field: ' + error.message
-      });
+      await fetchFields();
+    } catch (err) {
+      console.error('Error updating field:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleDeleteField = async (id) => {
     try {
-      const { error } = await supabase
-        .from('custom_field_definitions')
-        .delete()
-        .eq('id', id);
-
+      setLoading(true);
+      const { error } = await customFieldsService.deleteField(id);
       if (error) throw error;
-
-      setAlert({
-        type: 'success',
-        message: 'Custom field deleted successfully!'
-      });
       
       setDeleteConfirmField(null);
-      loadFields();
-    } catch (error) {
-      setAlert({
-        type: 'error',
-        message: 'Failed to delete custom field: ' + error.message
-      });
+      await fetchFields();
+    } catch (err) {
+      console.error('Error deleting field:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -266,11 +323,77 @@ export default function CustomFieldsManager() {
     }
   };
 
+  const addKeyValuePair = () => {
+    if (!newKeyValue.key.trim() || !newKeyValue.value.trim()) {
+      setError("Please enter both key and value");
+      return;
+    }
+
+    // Check for duplicate key
+    if (newField.options?.some(pair => pair.key === newKeyValue.key.trim())) {
+      setError("This key already exists");
+      return;
+    }
+
+    setNewField(prev => ({
+      ...prev,
+      options: [...(prev.options || []), { 
+        key: newKeyValue.key.trim(), 
+        value: newKeyValue.value.trim() 
+      }]
+    }));
+    setNewKeyValue({ key: '', value: '' });
+  };
+
+  const removeKeyValuePair = (keyToRemove) => {
+    setNewField(prev => ({
+      ...prev,
+      options: prev.options.filter(opt => opt.key !== keyToRemove)
+    }));
+  };
+
+  const addEditKeyValuePair = () => {
+    if (!editKeyValue.key.trim() || !editKeyValue.value.trim()) {
+      setError("Please enter both key and value");
+      return;
+    }
+
+    // Check for duplicate key
+    if (editingField.options?.some(pair => pair.key === editKeyValue.key.trim())) {
+      setError("This key already exists");
+      return;
+    }
+
+    setEditingField(prev => ({
+      ...prev,
+      options: [...(prev.options || []), { 
+        key: editKeyValue.key.trim(), 
+        value: editKeyValue.value.trim() 
+      }]
+    }));
+    setEditKeyValue({ key: '', value: '' });
+  };
+
+  const removeEditKeyValuePair = (keyToRemove) => {
+    setEditingField(prev => ({
+      ...prev,
+      options: prev.options.filter(opt => opt.key !== keyToRemove)
+    }));
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-6">
+        <Loader2 className="h-6 w-6 animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {alert && (
-        <Alert variant={alert.type === 'error' ? 'destructive' : 'default'}>
-          <AlertDescription>{alert.message}</AlertDescription>
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
@@ -297,25 +420,29 @@ export default function CustomFieldsManager() {
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Field Name</Label>
-              <Input
+              <Select
                 value={newField.name}
-                onChange={(e) => setNewField(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="Enter field name"
-              />
+                onValueChange={handleNameChange}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Field Name" />
+                </SelectTrigger>
+                <SelectContent>
+                  {getAvailableFieldNames().map((name) => (
+                    <SelectItem key={name} value={name}>{name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             
             <div className="space-y-2">
               <Label>Field Type</Label>
               <Select
-                value={newField.field_type}
-                onValueChange={(value) => setNewField(prev => ({ 
-                  ...prev, 
-                  field_type: value,
-                  options: value === 'select' ? [] : null
-                }))}
+                value={newField.fieldType}
+                disabled={true}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select field type" />
+                  <SelectValue placeholder="Field type" />
                 </SelectTrigger>
                 <SelectContent>
                   {FIELD_TYPES.map(type => (
@@ -331,13 +458,16 @@ export default function CustomFieldsManager() {
           <div className="flex items-center space-x-2">
             <Switch
               id="required"
-              checked={newField.is_required}
-              onCheckedChange={(checked) => setNewField(prev => ({ ...prev, is_required: checked }))}
+              checked={newField.isRequired}
+              disabled={true}
             />
-            <Label htmlFor="required">Required Field</Label>
+            <Label htmlFor="required" className={!newField.isRequired ? "text-muted-foreground" : ""}>
+              Required Field
+            </Label>
           </div>
 
-          {newField.field_type === 'select' && (
+          {/* Options Section */}
+          {newField.fieldType === 'select' && (
             <div className="space-y-4">
               <div className="flex gap-2">
                 <Input
@@ -376,9 +506,62 @@ export default function CustomFieldsManager() {
             </div>
           )}
 
+          {/* Metadata Key-Value Pairs Section */}
+          {newField.fieldType === 'metadata' && (
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <Label>Key</Label>
+                  <Input
+                    value={newKeyValue.key}
+                    onChange={(e) => setNewKeyValue(prev => ({ ...prev, key: e.target.value }))}
+                    placeholder="Enter key"
+                  />
+                </div>
+                <div className="flex-1">
+                  <Label>Value</Label>
+                  <Input
+                    value={newKeyValue.value}
+                    onChange={(e) => setNewKeyValue(prev => ({ ...prev, value: e.target.value }))}
+                    placeholder="Enter value"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button 
+                    variant="outline"
+                    onClick={addKeyValuePair}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {newField.options?.map((pair, index) => (
+                  <Badge
+                    key={index}
+                    variant="secondary"
+                    className="flex items-center gap-2"
+                  >
+                    <span className="font-medium">{pair.key}:</span> {pair.value}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-4 w-4 p-0"
+                      onClick={() => removeKeyValuePair(pair.key)}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+
           <Button
-            onClick={handleCreateField}
-            disabled={!newField.name || (newField.field_type === 'select' && (!newField.options || newField.options.length === 0))}
+            onClick={createField}
+            disabled={!newField.name || (newField.fieldType === 'select' && (!newField.options || newField.options.length === 0))}
           >
             Create Field
           </Button>
@@ -409,12 +592,21 @@ export default function CustomFieldsManager() {
                       ))}
                     </div>
                   )}
+                  {field.field_type === 'metadata' && field.options && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {Object.entries(field.options).map(([key, value], index) => (
+                        <Badge key={index} variant="outline">
+                          <span className="font-medium">{key}:</span> {value}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setEditingField(field)}
+                    onClick={() => handleEditField(field)}
                   >
                     <Pencil className="h-4 w-4" />
                   </Button>
@@ -445,7 +637,15 @@ export default function CustomFieldsManager() {
                 <Label>Field Name</Label>
                 <Input
                   value={editingField.name}
-                  onChange={(e) => setEditingField(prev => ({ ...prev, name: e.target.value }))}
+                  disabled={true}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Field Type</Label>
+                <Input
+                  value={editingField.field_type}
+                  disabled={true}
                 />
               </div>
 
@@ -453,11 +653,17 @@ export default function CustomFieldsManager() {
                 <Switch
                   id="edit-required"
                   checked={editingField.is_required}
-                  onCheckedChange={(checked) => setEditingField(prev => ({ ...prev, is_required: checked }))}
+                  disabled={true}
                 />
-                <Label htmlFor="edit-required">Required Field</Label>
+                <Label 
+                  htmlFor="edit-required"
+                  className={!editingField.is_required ? "text-muted-foreground" : ""}
+                >
+                  Required Field
+                </Label>
               </div>
 
+              {/* Edit Options Section */}
               {editingField.field_type === 'select' && (
                 <div className="space-y-4">
                   <div className="flex gap-2">
@@ -496,6 +702,59 @@ export default function CustomFieldsManager() {
                   </div>
                 </div>
               )}
+
+              {/* Edit Metadata Key-Value Pairs Section */}
+              {editingField.field_type === 'metadata' && (
+                <div className="space-y-4">
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <Label>Key</Label>
+                      <Input
+                        value={editKeyValue.key}
+                        onChange={(e) => setEditKeyValue(prev => ({ ...prev, key: e.target.value }))}
+                        placeholder="Enter key"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <Label>Value</Label>
+                      <Input
+                        value={editKeyValue.value}
+                        onChange={(e) => setEditKeyValue(prev => ({ ...prev, value: e.target.value }))}
+                        placeholder="Enter value"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <Button 
+                        variant="outline"
+                        onClick={addEditKeyValuePair}
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {editingField.options?.map((pair, index) => (
+                      <Badge
+                        key={index}
+                        variant="secondary"
+                        className="flex items-center gap-2"
+                      >
+                        <span className="font-medium">{pair.key}:</span> {pair.value}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-4 w-4 p-0"
+                          onClick={() => removeEditKeyValuePair(pair.key)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -505,7 +764,10 @@ export default function CustomFieldsManager() {
             </Button>
             <Button 
               onClick={handleUpdateField}
-              disabled={!editingField?.name || (editingField?.field_type === 'select' && (!editingField?.options || editingField?.options.length === 0))}
+              disabled={
+                !editingField?.name || 
+                (editingField?.field_type === 'select' && (!editingField?.options || editingField?.options.length === 0))
+              }
             >
               Save Changes
             </Button>
