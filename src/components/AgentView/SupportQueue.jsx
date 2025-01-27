@@ -173,8 +173,8 @@ const SupportQueue = ({
         aValue = a.creator?.full_name || a.creator?.email;
         bValue = b.creator?.full_name || b.creator?.email;
       } else if (sorting.field === 'assigned_agent') {
-        aValue = a.assigned_agent_id ? 'Assigned' : 'Unassigned';
-        bValue = b.assigned_agent_id ? 'Assigned' : 'Unassigned';
+        aValue = a.assigned_agent?.full_name || a.assigned_agent?.email || 'Unassigned';
+        bValue = b.assigned_agent?.full_name || b.assigned_agent?.email || 'Unassigned';
       }
 
       if (aValue === bValue) return 0;
@@ -566,7 +566,7 @@ const SupportQueue = ({
                     {ticket.creator?.full_name || ticket.creator?.email}
                   </TableCell>
                   <TableCell>
-                    {ticket.assigned_agent_id ? 'Assigned' : 'Unassigned'}
+                    {ticket.assigned_agent?.full_name || ticket.assigned_agent?.email || 'Unassigned'}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">
