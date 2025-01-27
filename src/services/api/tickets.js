@@ -197,12 +197,13 @@ export const ticketsService = {
     const { data, error } = await supabase
       .from('comments')
       .select(`
-        id,
-        content,
-        is_internal,
-        created_at,
-        updated_at,
-        user:profiles(id, full_name, email)
+        *,
+        user:profiles(
+          id,
+          full_name,
+          email,
+          role
+        )
       `)
       .eq('ticket_id', ticketId)
       .order('created_at', { ascending: true });
@@ -215,12 +216,13 @@ export const ticketsService = {
     const { data, error } = await supabase
       .from('comments')
       .select(`
-        id,
-        content,
-        is_internal,
-        created_at,
-        updated_at,
-        user:profiles(id, full_name, email)
+        *,
+        user:profiles(
+          id,
+          full_name,
+          email,
+          role
+        )
       `)
       .eq('ticket_id', ticketId)
       .eq('is_internal', false)

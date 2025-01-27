@@ -637,9 +637,21 @@ const CustomerTickets = ({ isWidget = false, maxHeight, onClose }) => {
                   <div className="space-y-4">
                     {ticketComments.map((comment) => (
                       <div key={comment.id} className="p-4 rounded-lg bg-muted">
-                        <div className="flex justify-between items-start mb-2">
-                          <span className="font-medium">{comment.user?.full_name || 'Unknown'}</span>
-                          <span className="text-sm text-muted-foreground">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className={`text-sm font-medium ${
+                              comment.user?.role === 'agent' || comment.user?.role === 'admin' ? 'text-blue-600' : ''
+                            }`}>
+                              {comment.user_id === user.id ? (
+                                'You'
+                              ) : comment.user?.role === 'agent' || comment.user?.role === 'admin' ? (
+                                <>Support Agent: {comment.user?.full_name || comment.user?.email || 'Support Team'}</>
+                              ) : (
+                                comment.user?.full_name || comment.user?.email || 'Customer'
+                              )}
+                            </span>
+                          </div>
+                          <span className="text-xs text-muted-foreground">
                             {new Date(comment.created_at).toLocaleString()}
                           </span>
                         </div>

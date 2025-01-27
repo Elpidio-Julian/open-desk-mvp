@@ -735,13 +735,13 @@ const SupportQueue = ({
                             >
                               <div className="flex justify-between items-start">
                                 <div>
-                                  <span className="text-sm font-medium">
-                                    {comment.user_id === ticketDetails.creator_id ? (
-                                      comment.user?.full_name || comment.user?.email
+                                  <span className={`text-sm font-medium ${
+                                    comment.user?.role === 'agent' || comment.user?.role === 'admin' ? 'text-blue-600' : ''
+                                  }`}>
+                                    {comment.user?.role === 'agent' || comment.user?.role === 'admin' ? (
+                                      <>Support Agent: {comment.user?.full_name || comment.user?.email || 'Support Team'}</>
                                     ) : (
-                                      <span className="text-primary">
-                                        (Support Agent) {comment.user?.full_name || comment.user?.email || 'Support Team'}
-                                      </span>
+                                      comment.user?.full_name || comment.user?.email || 'Customer'
                                     )}
                                   </span>
                                   {comment.is_internal && (
