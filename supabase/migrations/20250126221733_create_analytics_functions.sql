@@ -207,10 +207,13 @@ BEGIN
             COUNT(*) FILTER (WHERE was_resolved AND DATE(resolved_at) = CURRENT_DATE) as resolved_today,
             COUNT(*) FILTER (WHERE was_resolved AND resolved_at >= DATE_TRUNC('week', NOW())) as resolved_this_week,
             AVG(resolution_time_seconds) FILTER (WHERE was_resolved) as avg_resolution_seconds,
-            ROUND(
-                (COUNT(*) FILTER (WHERE was_resolved)::NUMERIC / 
-                NULLIF(COUNT(*), 0) * 100),
-                2
+            COALESCE(
+                ROUND(
+                    (COUNT(*) FILTER (WHERE was_resolved)::NUMERIC / 
+                    NULLIF(COUNT(*), 0) * 100),
+                    2
+                ),
+                0
             ) as resolution_rate
         FROM resolution_stats
     ),
@@ -220,10 +223,13 @@ BEGIN
             DATE_TRUNC('day', COALESCE(resolved_at, created_at)) as day,
             COUNT(*) FILTER (WHERE was_resolved) as resolved_count,
             COUNT(*) as total_count,
-            ROUND(
-                (COUNT(*) FILTER (WHERE was_resolved)::NUMERIC / 
-                NULLIF(COUNT(*), 0) * 100),
-                2
+            COALESCE(
+                ROUND(
+                    (COUNT(*) FILTER (WHERE was_resolved)::NUMERIC / 
+                    NULLIF(COUNT(*), 0) * 100),
+                    2
+                ),
+                0
             ) as daily_rate
         FROM resolution_stats
         GROUP BY DATE_TRUNC('day', COALESCE(resolved_at, created_at))
@@ -241,11 +247,11 @@ BEGIN
         FROM daily_trend
     )
     SELECT
-        m.total_resolved,
-        m.resolved_today,
-        m.resolved_this_week,
+        COALESCE(m.total_resolved, 0),
+        COALESCE(m.resolved_today, 0),
+        COALESCE(m.resolved_this_week, 0),
         COALESCE(make_interval(secs => m.avg_resolution_seconds), INTERVAL '0'),
-        m.resolution_rate,
+        COALESCE(m.resolution_rate, 0),
         COALESCE(t.trend, '[]'::jsonb)
     FROM metrics m
     CROSS JOIN trend_json t;
