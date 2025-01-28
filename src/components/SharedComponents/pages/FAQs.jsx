@@ -31,13 +31,17 @@ const FAQs = () => {
       const { data, error } = await supabase
         .from('custom_field_definitions')
         .select('*')
-        .eq('content_type', activeTab === 'faqs' ? 'faq' : 'article')
-        .order('order_index');
+        .eq('content_type', activeTab)
+        .order('display_order');
 
       if (error) throw error;
 
-      // Extract unique categories
-      const uniqueCategories = [...new Set(data.map(item => item.category).filter(Boolean))];
+      // Extract unique categories from options.category
+      const uniqueCategories = [...new Set(
+        data
+          .map(item => item.options?.category)
+          .filter(Boolean)
+      )];
       setCategories(uniqueCategories);
       
       // If no category is selected, select the first one
@@ -55,7 +59,7 @@ const FAQs = () => {
   };
 
   const filteredItems = selectedCategory
-    ? items.filter(item => item.category === selectedCategory)
+    ? items.filter(item => item.options?.category === selectedCategory)
     : items;
 
   return (
@@ -111,7 +115,7 @@ const FAQs = () => {
                             {faq.name}
                           </AccordionTrigger>
                           <AccordionContent className="text-muted-foreground whitespace-pre-line">
-                            <ReactMarkdown>{faq.content}</ReactMarkdown>
+                            <ReactMarkdown>{faq.description}</ReactMarkdown>
                           </AccordionContent>
                         </AccordionItem>
                       ))}
@@ -146,13 +150,13 @@ const FAQs = () => {
                     {filteredItems.map((article) => (
                       <Card key={article.id} className="p-6">
                         <h2 className="text-xl font-semibold mb-2">{article.name}</h2>
-                        {article.category && (
+                        {article.options?.category && (
                           <Badge variant="outline" className="mb-4">
-                            {article.category}
+                            {article.options.category}
                           </Badge>
                         )}
                         <div className="prose dark:prose-invert max-w-none">
-                          <ReactMarkdown>{article.content}</ReactMarkdown>
+                          <ReactMarkdown>{article.description}</ReactMarkdown>
                         </div>
                       </Card>
                     ))}

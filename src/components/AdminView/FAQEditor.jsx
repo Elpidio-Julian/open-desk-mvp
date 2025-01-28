@@ -31,9 +31,9 @@ export default function FAQEditor() {
   const [editingItem, setEditingItem] = useState(null);
   const [newItem, setNewItem] = useState({
     name: '',
-    content_type: 'faq',
+    content_type: 'faqs',
     category: '',
-    content: ''
+    description: ''
   });
   const [showPreview, setShowPreview] = useState(false);
 
@@ -46,8 +46,8 @@ export default function FAQEditor() {
       const { data, error } = await supabase
         .from('custom_field_definitions')
         .select('*')
-        .in('content_type', [activeTab === 'faqs' ? 'faq' : 'article'])
-        .order('order_index');
+        .eq('content_type', activeTab)
+        .order('display_order');
 
       if (error) throw error;
       setItems(data || []);
@@ -65,11 +65,13 @@ export default function FAQEditor() {
         .from('custom_field_definitions')
         .insert([{
           name: newItem.name,
-          content_type: activeTab === 'faqs' ? 'faq' : 'article',
-          category: newItem.category,
-          content: newItem.content,
+          content_type: activeTab,
+          description: newItem.description,
           field_type: 'text',
-          order_index: items.length
+          display_order: items.length,
+          options: {
+            category: newItem.category || null
+          }
         }]);
 
       if (error) throw error;
@@ -81,9 +83,9 @@ export default function FAQEditor() {
       
       setNewItem({
         name: '',
-        content_type: activeTab === 'faqs' ? 'faq' : 'article',
+        content_type: activeTab,
         category: '',
-        content: ''
+        description: ''
       });
       
       loadItems();
@@ -101,8 +103,11 @@ export default function FAQEditor() {
         .from('custom_field_definitions')
         .update({
           name: editingItem.name,
-          category: editingItem.category,
-          content: editingItem.content
+          description: editingItem.description,
+          options: {
+            ...editingItem.options,
+            category: editingItem.category || null
+          }
         })
         .eq('id', editingItem.id);
 
@@ -160,7 +165,7 @@ export default function FAQEditor() {
     try {
       const updates = newItems.map((item, index) => ({
         id: item.id,
-        order_index: index
+        display_order: index
       }));
 
       const { error } = await supabase
@@ -212,11 +217,11 @@ export default function FAQEditor() {
                   />
                   <Textarea
                     placeholder="Answer (supports markdown)"
-                    value={newItem.content}
-                    onChange={(e) => setNewItem({ ...newItem, content: e.target.value })}
+                    value={newItem.description}
+                    onChange={(e) => setNewItem({ ...newItem, description: e.target.value })}
                     rows={4}
                   />
-                  <Button onClick={handleCreateItem} disabled={!newItem.name || !newItem.content}>
+                  <Button onClick={handleCreateItem} disabled={!newItem.name || !newItem.description}>
                     Add FAQ
                   </Button>
                 </div>
@@ -228,11 +233,11 @@ export default function FAQEditor() {
                       <div className="flex justify-between items-start">
                         <div className="space-y-2 flex-1">
                           <div className="font-medium">{item.name}</div>
-                          {item.category && (
-                            <Badge variant="outline">{item.category}</Badge>
+                          {item.options?.category && (
+                            <Badge variant="outline">{item.options.category}</Badge>
                           )}
                           <div className="text-sm text-muted-foreground whitespace-pre-line">
-                            {item.content}
+                            {item.description}
                           </div>
                         </div>
                         <div className="flex gap-2">
@@ -305,16 +310,16 @@ export default function FAQEditor() {
                   </div>
                   {showPreview ? (
                     <Card className="p-4 prose dark:prose-invert max-w-none">
-                      <ReactMarkdown>{newItem.content}</ReactMarkdown>
+                      <ReactMarkdown>{newItem.description}</ReactMarkdown>
                     </Card>
                   ) : (
                     <Textarea
-                      value={newItem.content}
-                      onChange={(e) => setNewItem({ ...newItem, content: e.target.value })}
+                      value={newItem.description}
+                      onChange={(e) => setNewItem({ ...newItem, description: e.target.value })}
                       rows={8}
                     />
                   )}
-                  <Button onClick={handleCreateItem} disabled={!newItem.name || !newItem.content}>
+                  <Button onClick={handleCreateItem} disabled={!newItem.name || !newItem.description}>
                     Add Article
                   </Button>
                 </div>
@@ -326,11 +331,11 @@ export default function FAQEditor() {
                       <div className="flex justify-between items-start">
                         <div className="space-y-2 flex-1">
                           <div className="font-medium">{item.name}</div>
-                          {item.category && (
-                            <Badge variant="outline">{item.category}</Badge>
+                          {item.options?.category && (
+                            <Badge variant="outline">{item.options.category}</Badge>
                           )}
                           <Card className="p-4 prose dark:prose-invert max-w-none">
-                            <ReactMarkdown>{item.content}</ReactMarkdown>
+                            <ReactMarkdown>{item.description}</ReactMarkdown>
                           </Card>
                         </div>
                         <div className="flex gap-2">
@@ -404,16 +409,16 @@ export default function FAQEditor() {
             </div>
             {showPreview ? (
               <Card className="p-4 prose dark:prose-invert max-w-none">
-                <ReactMarkdown>{editingItem?.content || ''}</ReactMarkdown>
+                <ReactMarkdown>{editingItem?.description || ''}</ReactMarkdown>
               </Card>
             ) : (
               <Textarea
-                value={editingItem?.content || ''}
-                onChange={(e) => setEditingItem({ ...editingItem, content: e.target.value })}
+                value={editingItem?.description || ''}
+                onChange={(e) => setEditingItem({ ...editingItem, description: e.target.value })}
                 rows={8}
               />
             )}
-            <Button onClick={handleUpdateItem} disabled={!editingItem?.name || !editingItem?.content}>
+            <Button onClick={handleUpdateItem} disabled={!editingItem?.name || !editingItem?.description}>
               Update {activeTab === 'faqs' ? 'FAQ' : 'Article'}
             </Button>
           </div>
