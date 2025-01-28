@@ -49,12 +49,12 @@ const TeamManagement = () => {
       if (error && error.code !== 'PGRST116') throw error;
       
       if (field?.options && Object.keys(field.options).length > 0) {
-        // Convert options object to array of { value, label } pairs
-        const areas = Object.entries(field.options).map(([key, value]) => ({
-          value: key,
-          label: value
-        }));
-        setFocusAreas(areas);
+      // Convert options object to array of { value, label } pairs
+      const areas = Object.entries(field.options).map(([key, value]) => ({
+        value: key,
+        label: value
+      }));
+      setFocusAreas(areas);
       } else {
         // If no focus areas are set, clear the array
         setFocusAreas([]);

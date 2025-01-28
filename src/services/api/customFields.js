@@ -53,11 +53,21 @@ export const customFieldsService = {
   },
 
   getFieldByName: async (name) => {
-    const { data, error } = await supabase
-      .from('custom_field_definitions')
-      .select('*')
-      .eq('name', name)
-      .single();
-    return { data, error };
+    try {
+      const { data, error } = await supabase
+        .from('custom_field_definitions')
+        .select('*')
+        .eq('name', name)
+        .maybeSingle();
+
+      if (!data) {
+        return { data: null, error: { code: 'PGRST116', message: 'No data found' } };
+      }
+
+      return { data, error };
+    } catch (err) {
+      console.error('Error fetching custom field:', err);
+      return { data: null, error: err };
+    }
   }
 }; 
