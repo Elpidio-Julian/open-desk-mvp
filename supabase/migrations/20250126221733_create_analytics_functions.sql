@@ -72,49 +72,53 @@ RETURNS TABLE (
     avg_response_time INTERVAL,
     response_time_trend JSONB
 ) AS $$
-DECLARE
-    agent_profile_id UUID;
 BEGIN
-    -- Get the profile_id for the agent
-    SELECT profile_id INTO agent_profile_id
-    FROM agents
-    WHERE id = agent_id;
-
     RETURN QUERY
-    WITH first_responses AS (
-        -- Get first response for each ticket
+    WITH ticket_comments AS (
+        -- Get all relevant comments first
         SELECT 
             t.id as ticket_id,
             t.created_at as ticket_created,
-            MIN(c.created_at) as first_response
+            c.created_at as comment_created
         FROM tickets t
         LEFT JOIN comments c ON c.ticket_id = t.id
         WHERE 
             t.assigned_agent_id = agent_id
             AND t.created_at >= (CURRENT_TIMESTAMP - time_period)
-            AND c.user_id = agent_profile_id
+            AND c.user_id = agent_id  -- Agent's responses
             AND NOT c.is_internal
-        GROUP BY t.id, t.created_at
+    ),
+    first_responses AS (
+        -- Calculate first response for each ticket
+        SELECT 
+            ticket_id,
+            ticket_created,
+            MIN(comment_created) as first_response
+        FROM ticket_comments
+        GROUP BY ticket_id, ticket_created
     ),
     response_times AS (
-        -- Get all response times
+        -- Calculate time between consecutive responses
         SELECT 
-            t.id as ticket_id,
-            c.created_at,
-            c.created_at - LAG(c.created_at) OVER (
-                PARTITION BY t.id 
-                ORDER BY c.created_at
+            ticket_id,
+            comment_created - LAG(comment_created) OVER (
+                PARTITION BY ticket_id 
+                ORDER BY comment_created
             ) as response_time
-        FROM tickets t
-        JOIN comments c ON c.ticket_id = t.id
-        WHERE 
-            t.assigned_agent_id = agent_id
-            AND t.created_at >= (CURRENT_TIMESTAMP - time_period)
-            AND c.user_id = agent_profile_id
-            AND NOT c.is_internal
+        FROM ticket_comments
     ),
-    metrics AS (
-        -- Calculate overall metrics
+    daily_averages AS (
+        -- Calculate daily response time averages
+        SELECT 
+            DATE_TRUNC('day', fr.first_response) as day,
+            -- Calculate average first response time for the day
+            EXTRACT(EPOCH FROM AVG(fr.first_response - fr.ticket_created)) as avg_response_seconds
+        FROM first_responses fr
+        WHERE fr.first_response IS NOT NULL
+        GROUP BY DATE_TRUNC('day', fr.first_response)
+    ),
+    overall_metrics AS (
+        -- Calculate overall averages
         SELECT
             make_interval(secs => AVG(
                 EXTRACT(EPOCH FROM (first_response - ticket_created))
@@ -122,38 +126,46 @@ BEGIN
             make_interval(secs => AVG(
                 EXTRACT(EPOCH FROM response_time)
             )) as avg_response_time
-        FROM first_responses
-        LEFT JOIN response_times USING (ticket_id)
+        FROM first_responses fr
+        LEFT JOIN response_times rt USING (ticket_id)
     ),
-    daily_trend AS (
-        -- Calculate daily trend data
+    trend_data AS (
+        -- Format trend data
         SELECT 
-            DATE_TRUNC('day', first_response) as day,
-            ROUND(
-                AVG(
-                    EXTRACT(EPOCH FROM (first_response - ticket_created))
-                )
-            ) as avg_response_seconds
-        FROM first_responses
-        WHERE first_response IS NOT NULL
-        GROUP BY DATE_TRUNC('day', first_response)
+            day,
+            ROUND(avg_response_seconds) as avg_response_seconds
+        FROM daily_averages
+        ORDER BY day
     ),
-    trend_json AS (
-        -- Format trend data as JSON
-        SELECT jsonb_agg(
-            jsonb_build_object(
-                'date', day,
-                'average_response_time', avg_response_seconds
-            ) ORDER BY day
-        ) as trend
-        FROM daily_trend
+    final_metrics AS (
+        -- Ensure we always get a row, even with no data
+        SELECT
+            COALESCE(m.avg_first_response, INTERVAL '0') as avg_first_response,
+            COALESCE(m.avg_response_time, INTERVAL '0') as avg_response_time
+        FROM overall_metrics m
+        UNION ALL
+        SELECT 
+            INTERVAL '0',
+            INTERVAL '0'
+        WHERE NOT EXISTS (SELECT 1 FROM overall_metrics)
+        LIMIT 1
     )
     SELECT
-        COALESCE(m.avg_first_response, INTERVAL '0'),
-        COALESCE(m.avg_response_time, INTERVAL '0'),
-        COALESCE(t.trend, '[]'::jsonb)
-    FROM metrics m
-    CROSS JOIN trend_json t;
+        fm.avg_first_response,
+        fm.avg_response_time,
+        COALESCE(
+            (
+                SELECT jsonb_agg(
+                    jsonb_build_object(
+                        'date', day,
+                        'average_response_time', avg_response_seconds
+                    )
+                )
+                FROM trend_data
+            ),
+            '[]'::jsonb
+        )
+    FROM final_metrics fm;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
