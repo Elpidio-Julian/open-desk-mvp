@@ -173,16 +173,16 @@ export const teamsService = {
       .select('profile_id')
       .eq('team_id', teamId);
 
-    const existingIds = existingMembers?.map(m => m.profile_id) || [];
-
-    // Then get all eligible profiles not in the team
+    // Build the base query
     let query = supabase
       .from('profiles')
       .select('id, full_name, email, role')
       .in('role', ['agent', 'admin']);
 
-    if (existingIds.length > 0) {
-      query = query.not('id', 'in', existingIds);
+    // Only add the not in filter if there are existing members
+    if (existingMembers && existingMembers.length > 0) {
+      const existingIds = existingMembers.map(m => m.profile_id);
+      query = query.not('id', 'in', `(${existingIds.join(',')})`);
     }
 
     // Add search filter if provided
@@ -190,6 +190,7 @@ export const teamsService = {
       query = query.ilike('full_name', `%${search}%`);
     }
 
+    // Add ordering
     query = query.order('full_name');
 
     const { data, error } = await query;
