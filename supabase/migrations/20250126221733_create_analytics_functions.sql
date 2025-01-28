@@ -11,7 +11,15 @@ RETURNS TABLE (
 ) AS $$
 BEGIN
     RETURN QUERY
-    WITH active_tickets AS (
+    WITH possible_statuses AS (
+        -- Define all possible ticket statuses
+        SELECT unnest(enum_range(NULL::ticket_status)) as status
+    ),
+    possible_priorities AS (
+        -- Define all possible ticket priorities
+        SELECT unnest(enum_range(NULL::ticket_priority)) as priority
+    ),
+    active_tickets AS (
         SELECT 
             t.status,
             t.priority,
@@ -23,22 +31,23 @@ BEGIN
             AND t.status NOT IN ('resolved', 'closed', 'archived')
     ),
     status_counts AS (
-        -- Pre-calculate counts by status
+        -- Pre-calculate counts by status, including all possible statuses
         SELECT 
-            status,
-            COUNT(*) as count
-        FROM active_tickets
-        WHERE status IS NOT NULL
-        GROUP BY status
+            ps.status,
+            COUNT(t.status) as count
+        FROM possible_statuses ps
+        LEFT JOIN active_tickets t ON t.status = ps.status
+        WHERE ps.status NOT IN ('resolved', 'closed', 'archived')
+        GROUP BY ps.status
     ),
     priority_counts AS (
-        -- Pre-calculate counts by priority
+        -- Pre-calculate counts by priority, including all possible priorities
         SELECT 
-            priority,
-            COUNT(*) as count
-        FROM active_tickets
-        WHERE priority IS NOT NULL
-        GROUP BY priority
+            pp.priority,
+            COUNT(t.priority) as count
+        FROM possible_priorities pp
+        LEFT JOIN active_tickets t ON t.priority = pp.priority
+        GROUP BY pp.priority
     ),
     metrics AS (
         -- Calculate total and age metrics
@@ -50,11 +59,11 @@ BEGIN
     SELECT
         m.total_active,
         COALESCE(
-            (SELECT jsonb_object_agg(status, count) FROM status_counts),
+            (SELECT jsonb_object_agg(status::text, count) FROM status_counts),
             '{}'::jsonb
         ) as by_status,
         COALESCE(
-            (SELECT jsonb_object_agg(priority, count) FROM priority_counts),
+            (SELECT jsonb_object_agg(priority::text, count) FROM priority_counts),
             '{}'::jsonb
         ) as by_priority,
         m.oldest_ticket_age
