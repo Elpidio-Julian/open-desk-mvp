@@ -69,5 +69,66 @@ export const customFieldsService = {
       console.error('Error fetching custom field:', err);
       return { data: null, error: err };
     }
+  },
+
+  // Routing rules specific methods
+  getRoutingRules: async () => {
+    const { data, error } = await supabase
+      .from('custom_field_definitions')
+      .select('*')
+      .eq('content_type', 'routing_rules')
+      .order('display_order', { ascending: true });
+    
+    if (error) throw error;
+    return data?.map(rule => ({
+      id: rule.id,
+      name: rule.name,
+      description: rule.description,
+      is_active: rule.is_active,
+      conditions: rule.options?.conditions || {},
+      target_skills: rule.options?.target_skills || {},
+      weight: rule.options?.weight || 1
+    })) || [];
+  },
+
+  createRoutingRule: async (ruleData) => {
+    const { data, error } = await supabase
+      .from('custom_field_definitions')
+      .insert({
+        name: ruleData.name,
+        description: ruleData.description,
+        content_type: 'routing_rules',
+        field_type: 'metadata',
+        options: {
+          conditions: ruleData.conditions || {},
+          target_skills: ruleData.target_skills || {},
+          weight: ruleData.weight || 1
+        },
+        is_active: ruleData.is_active
+      })
+      .select()
+      .single();
+
+    return { data, error };
+  },
+
+  updateRoutingRule: async (ruleId, ruleData) => {
+    const { data, error } = await supabase
+      .from('custom_field_definitions')
+      .update({
+        name: ruleData.name,
+        description: ruleData.description,
+        options: {
+          conditions: ruleData.conditions || {},
+          target_skills: ruleData.target_skills || {},
+          weight: ruleData.weight || 1
+        },
+        is_active: ruleData.is_active
+      })
+      .eq('id', ruleId)
+      .select()
+      .single();
+
+    return { data, error };
   }
 }; 

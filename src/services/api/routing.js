@@ -1,19 +1,16 @@
 import { supabase } from '../supabase';
+import { customFieldsService } from './customFields';
 
 /**
  * Get matching routing rules for a ticket based on its properties
  */
 async function getMatchingRules(ticket) {
-    const { data: rules, error } = await supabase
-        .from('routing_rules')
-        .select('*')
-        .eq('is_active', true)
-        .order('weight', { ascending: false });
-
-    if (error) throw error;
-
+    const rules = await customFieldsService.getRoutingRules();
+    
     // Filter rules based on conditions
     return rules.filter(rule => {
+        if (!rule.is_active) return false;
+        
         const conditions = rule.conditions;
         
         // Check priority match
@@ -40,7 +37,7 @@ async function getMatchingRules(ticket) {
         }
 
         return true;
-    });
+    }).sort((a, b) => b.weight - a.weight);
 }
 
 /**
@@ -202,18 +199,17 @@ async function getRoutingRules() {
  * Create or update routing rule
  */
 async function upsertRoutingRule(rule) {
-    const { data, error } = await supabase
-        .from('routing_rules')
-        .upsert(rule);
-
-    if (error) throw error;
-    return data;
+    if (rule.id) {
+        return customFieldsService.updateRoutingRule(rule.id, rule);
+    } else {
+        return customFieldsService.createRoutingRule(rule);
+    }
 }
 
 export const routingService = {
     autoAssignTicket,
     getAgentSkills,
     updateAgentSkills,
-    getRoutingRules,
+    getRoutingRules: customFieldsService.getRoutingRules,
     upsertRoutingRule
 }; 
