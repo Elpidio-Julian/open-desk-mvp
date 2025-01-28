@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS agents (
     profile_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    metadata JSONB DEFAULT '{}',
     UNIQUE(team_id, profile_id)
 );
 
