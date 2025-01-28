@@ -52,17 +52,26 @@ export default function RoutingSettings() {
 
   const loadAgents = async () => {
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('id, full_name, email')
-        .eq('role', 'agent')
-        .eq('is_active', true)
-        .order('full_name');
+      console.log('Starting to load agents...');
+      const { data, error } = await routingService.getAvailableAgents();
+      
+      if (error) {
+        console.error('Error loading agents:', error);
+        setAlert({ variant: 'destructive', message: `Failed to load agents: ${error.message}` });
+        return;
+      }
 
-      if (error) throw error;
+      console.log('Loaded agents:', data);
+      
+      if (!data || data.length === 0) {
+        console.log('No agents found');
+        setAlert({ variant: 'default', message: 'No agents found in the system' });
+      }
+
       setAgents(data || []);
     } catch (error) {
-      setAlert({ variant: 'destructive', message: 'Failed to load agents' });
+      console.error('Unexpected error loading agents:', error);
+      setAlert({ variant: 'destructive', message: `Failed to load agents: ${error.message}` });
     }
   };
 
@@ -77,8 +86,8 @@ export default function RoutingSettings() {
 
   const loadAgentSkills = async (agentId) => {
     try {
-      const data = await routingService.getAgentSkills(agentId);
-      setAgentSkills(data);
+      const skills = await routingService.getAgentSkills(agentId);
+      setAgentSkills(skills || []);
     } catch (error) {
       setAlert({ variant: 'destructive', message: 'Failed to load agent skills' });
     }
@@ -86,8 +95,9 @@ export default function RoutingSettings() {
 
   const handleAddSkill = async () => {
     try {
-      await routingService.updateAgentSkills(selectedAgent, [...agentSkills, newSkill]);
-      setAgentSkills([...agentSkills, newSkill]);
+      const updatedSkills = [...agentSkills, newSkill];
+      await routingService.updateAgentSkills(selectedAgent, updatedSkills);
+      setAgentSkills(updatedSkills);
       setNewSkill({ category: '', skill_name: '', proficiency_level: 1 });
       setAlert({ variant: 'default', message: 'Skill added successfully' });
     } catch (error) {
@@ -187,8 +197,8 @@ export default function RoutingSettings() {
                 </SelectTrigger>
                 <SelectContent>
                   {agents.map(agent => (
-                    <SelectItem key={agent.id} value={agent.id}>
-                      {agent.full_name} ({agent.email})
+                    <SelectItem key={agent.id} value={agent.profile.id}>
+                      {agent.profile.full_name} ({agent.profile.email})
                     </SelectItem>
                   ))}
                 </SelectContent>

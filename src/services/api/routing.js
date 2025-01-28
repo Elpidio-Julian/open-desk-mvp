@@ -41,66 +41,55 @@ async function getMatchingRules(ticket) {
 }
 
 /**
- * Get available agents based on skills and workload
+ * Get available agents
  */
 async function getAvailableAgents(requiredSkills = []) {
-    console.log('Searching for agents with required skills:', requiredSkills);
-    
-    // First check what roles exist in the database
-    const { data: allUsers, error: roleError } = await supabase
-        .from('users')
-        .select('id, full_name, role');
+    try {
+        console.log('Fetching available agents...');
+        const { data: agents, error } = await supabase
+            .from('agents')
+            .select(`
+                id,
+                metadata,
+                profile:profile_id (
+                    id,
+                    full_name,
+                    email,
+                    role
+                )
+            `);
 
-    if (roleError) {
-        console.error('Error checking roles:', roleError);
-        throw roleError;
-    }
-    console.log('All users and their roles:', allUsers);
+        if (error) {
+            console.error('Error fetching agents:', error);
+            throw error;
+        }
 
-    // Get agents with required skills
-    const { data: agents, error } = await supabase
-        .from('users')
-        .select(`
-            *,
-            agent_skills(*),
-            agent_workload_metrics(*)
-        `)
-        .eq('role', 'support_agent') // Try support_agent instead of agent
-        .eq('is_active', true);
+        console.log('Raw agents data:', agents);
 
-    if (error) {
-        console.error('Error fetching agents:', error);
-        throw error;
-    }
+        if (!agents || agents.length === 0) {
+            console.log('No agents found in the database');
+            return { data: [], error: null };
+        }
 
-    console.log('Found agents before filtering:', agents);
-
-    // Filter agents based on skills and sort by workload
-    const filteredAgents = agents
-        .filter(agent => {
-            if (!requiredSkills.length) {
-                console.log('No skills required, including agent:', agent.full_name);
-                return true;
-            }
+        // Filter agents based on skills
+        const filteredAgents = agents.filter(agent => {
+            if (!requiredSkills.length) return true;
             
-            const agentSkills = agent.agent_skills?.map(s => s.skill_name) || [];
-            console.log('Agent skills for', agent.full_name, ':', agentSkills);
-            
-            const hasRequiredSkills = requiredSkills.every(skill => agentSkills.includes(skill));
-            console.log('Agent', agent.full_name, hasRequiredSkills ? 'has' : 'does not have', 'required skills');
-            
-            return hasRequiredSkills;
-        })
-        .sort((a, b) => {
-            const aMetrics = a.agent_workload_metrics[0] || {};
-            const bMetrics = b.agent_workload_metrics[0] || {};
-            
-            // Sort by active tickets (ascending)
-            return (aMetrics.active_tickets || 0) - (bMetrics.active_tickets || 0);
+            const agentSkills = agent.metadata?.skills || [];
+            return requiredSkills.every(required => 
+                agentSkills.some(agentSkill => 
+                    agentSkill.category === required.category && 
+                    agentSkill.skill_name === required.skill_name
+                )
+            );
         });
 
-    console.log('Filtered and sorted agents:', filteredAgents);
-    return filteredAgents;
+        console.log('Filtered agents:', filteredAgents);
+        return { data: filteredAgents, error: null };
+    } catch (err) {
+        console.error('Error in getAvailableAgents:', err);
+        return { data: null, error: err };
+    }
 }
 
 /**
@@ -124,13 +113,13 @@ async function findBestAgent(ticket) {
     const agents = await getAvailableAgents(targetSkills);
     console.log('Available agents:', agents);
     
-    if (!agents.length) {
+    if (!agents.data.length) {
         console.log('No agents available with required skills');
         return null;
     }
 
     // Return agent with lowest workload
-    return agents[0];
+    return agents.data[0];
 }
 
 /**
@@ -158,26 +147,44 @@ async function autoAssignTicket(ticketId) {
  */
 async function getAgentSkills(agentId) {
     const { data, error } = await supabase
-        .from('agent_skills')
-        .select('*')
-        .eq('agent_id', agentId);
+        .from('agents')
+        .select(`
+            id,
+            metadata,
+            profile:profile_id (
+                id,
+                full_name,
+                email,
+                role
+            )
+        `)
+        .eq('profile_id', agentId)
+        .single();
 
     if (error) throw error;
-    return data;
+    return data?.metadata?.skills || [];
 }
 
 /**
  * Update agent skills
  */
 async function updateAgentSkills(agentId, skills) {
+    // First get the current agent data to preserve other metadata
+    const { data: currentAgent } = await supabase
+        .from('agents')
+        .select('metadata')
+        .eq('profile_id', agentId)
+        .single();
+
     const { error } = await supabase
-        .from('agent_skills')
-        .upsert(
-            skills.map(skill => ({
-                agent_id: agentId,
-                ...skill
-            }))
-        );
+        .from('agents')
+        .update({
+            metadata: {
+                ...(currentAgent?.metadata || {}),
+                skills: skills
+            }
+        })
+        .eq('profile_id', agentId);
 
     if (error) throw error;
 }
@@ -211,5 +218,6 @@ export const routingService = {
     getAgentSkills,
     updateAgentSkills,
     getRoutingRules: customFieldsService.getRoutingRules,
-    upsertRoutingRule
+    upsertRoutingRule,
+    getAvailableAgents
 }; 
