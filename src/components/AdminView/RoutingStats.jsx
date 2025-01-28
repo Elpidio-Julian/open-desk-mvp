@@ -7,6 +7,7 @@ import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Trash2, ChevronDown, ChevronUp, Search } from 'lucide-react';
 import { supabase } from '../../services/supabase';
+import { customFieldsService } from '../../services/api/customFields';
 
 export default function RoutingStats() {
   const [stats, setStats] = useState({
@@ -34,54 +35,103 @@ export default function RoutingStats() {
 
   const loadStats = async () => {
     try {
-      // Get total and auto-assigned tickets
+      // Get tickets from last 30 days
       const { data: ticketStats, error: ticketError } = await supabase
         .from('tickets')
-        .select('id, auto_assigned, routing_rule_id, assigned_to, created_at')
-        .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()); // Last 30 days
+        .select(`
+          id, 
+          metadata,
+          assigned_agent_id,
+          created_at
+        `)
+        .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
 
       if (ticketError) throw ticketError;
 
-      // Get rules data
-      const { data: rules, error: rulesError } = await supabase
-        .from('routing_rules')
-        .select('id, name');
+      // Handle no tickets case
+      if (!ticketStats || ticketStats.length === 0) {
+        setStats({
+          total: 0,
+          autoAssigned: 0,
+          ruleMatches: [],
+          agentAssignments: [],
+          avgAssignmentTime: 0
+        });
+        return;
+      }
 
-      if (rulesError) throw rulesError;
+      // Get rules data
+      const { data: rules, error: rulesError } = await customFieldsService.getRoutingRules();
+      if (rulesError && rulesError.code !== 'PGRST116') throw rulesError;
 
       // Get agents data
       const { data: agents, error: agentsError } = await supabase
-        .from('users')
-        .select('id, full_name')
-        .eq('role', 'agent');
+        .from('agents')
+        .select(`
+          id,
+          profile:profile_id (
+            id,
+            full_name
+          )
+        `);
 
       if (agentsError) throw agentsError;
 
       // Calculate statistics
       const total = ticketStats.length;
-      const autoAssigned = ticketStats.filter(t => t.auto_assigned).length;
+      const autoAssigned = ticketStats.filter(t => t.metadata?.auto_assigned === true).length;
 
-      // Calculate rule matches
-      const ruleMatches = rules.map(rule => ({
+      // Calculate rule matches - now using metadata.rule_name
+      const ruleMatchCounts = {};
+      ticketStats.forEach(ticket => {
+        const ruleName = ticket.metadata?.rule_name;
+        if (ruleName) {
+          ruleMatchCounts[ruleName] = (ruleMatchCounts[ruleName] || 0) + 1;
+        }
+      });
+
+      // Map rule matches to include both existing rules and rules found in tickets
+      const ruleMatches = (rules || []).map(rule => ({
         ...rule,
-        count: ticketStats.filter(t => t.routing_rule_id === rule.id).length
-      })).sort((a, b) => b.count - a.count);
+        count: ruleMatchCounts[rule.name] || 0
+      }));
+
+      // Add any rules found in tickets but not in current rules (historical data)
+      Object.entries(ruleMatchCounts).forEach(([ruleName, count]) => {
+        if (!ruleMatches.some(r => r.name === ruleName)) {
+          ruleMatches.push({
+            id: ruleName, // Use name as id for historical rules
+            name: ruleName,
+            count: count,
+            isHistorical: true // Flag to indicate this rule no longer exists
+          });
+        }
+      });
+
+      // Sort rules by count
+      ruleMatches.sort((a, b) => b.count - a.count);
 
       // Calculate agent assignments
-      const agentAssignments = agents.map(agent => ({
-        ...agent,
-        count: ticketStats.filter(t => t.assigned_to === agent.id).length,
-        autoAssigned: ticketStats.filter(t => t.assigned_to === agent.id && t.auto_assigned).length
-      })).sort((a, b) => b.count - a.count);
+      const agentAssignments = (agents || []).map(agent => {
+        const agentTickets = ticketStats.filter(t => t.assigned_agent_id === agent.profile.id);
+        return {
+          ...agent.profile,
+          count: agentTickets.length,
+          autoAssigned: agentTickets.filter(t => t.metadata?.auto_assigned === true).length
+        };
+      }).sort((a, b) => b.count - a.count);
 
       // Calculate average assignment time (for auto-assigned tickets)
-      const assignedTickets = ticketStats.filter(t => t.auto_assigned && t.assigned_to);
+      const assignedTickets = ticketStats.filter(t => 
+        t.metadata?.auto_assigned === true && 
+        t.assigned_agent_id && 
+        t.metadata?.assignment_time
+      );
+
       const avgTime = assignedTickets.length > 0 
         ? assignedTickets.reduce((acc, t) => {
-            const createTime = new Date(t.created_at).getTime();
-            // For auto-assigned tickets, assume assignment happened right after creation
-            const assignTime = createTime + 1000; // Add 1 second to creation time
-            return acc + (assignTime - createTime);
+            const assignTime = t.metadata?.assignment_time || 0;
+            return acc + assignTime;
           }, 0) / assignedTickets.length
         : 0;
 
@@ -95,6 +145,7 @@ export default function RoutingStats() {
 
     } catch (error) {
       console.error('Failed to load routing statistics:', error);
+      setAlert({ variant: 'destructive', message: 'Failed to load routing statistics' });
     }
   };
 
@@ -159,42 +210,37 @@ export default function RoutingStats() {
                   key={rule.id} 
                   className={`border p-2 transition-all hover:bg-accent ${expandedRuleId === rule.id ? 'bg-muted' : ''}`}
                 >
-                  <div 
-                    className="flex justify-between items-center cursor-pointer"
-                    onClick={() => toggleRule(rule.id)}
-                  >
-                    <div className="flex items-center gap-2">
-                      {expandedRuleId === rule.id ? (
-                        <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                      ) : (
-                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                      )}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
                       <span className="font-medium">{rule.name}</span>
+                      {rule.isHistorical && (
+                        <Badge variant="outline" className="text-muted-foreground">Historical</Badge>
+                      )}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center space-x-2">
                       <Badge variant="secondary">{rule.count} matches</Badge>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteRuleId(rule.id);
-                        }}
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {!rule.isHistorical && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => toggleRule(rule.id)}
+                        >
+                          {expandedRuleId === rule.id ? (
+                            <ChevronUp className="h-4 w-4" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4" />
+                          )}
+                        </Button>
+                      )}
                     </div>
                   </div>
-                  {expandedRuleId === rule.id && (
-                    <div className="mt-2 pt-2 border-t">
-                      <div className="text-sm text-muted-foreground">
-                        Match Rate: {((rule.count / stats.total) * 100).toFixed(1)}%
-                      </div>
-                      <Progress 
-                        value={(rule.count / stats.total) * 100} 
-                        className="h-2 mt-2"
-                      />
+                  
+                  {expandedRuleId === rule.id && !rule.isHistorical && (
+                    <div className="mt-2 space-y-2">
+                      <Progress value={(rule.count / stats.total) * 100} className="h-2" />
+                      <p className="text-sm text-muted-foreground">
+                        {((rule.count / stats.total) * 100).toFixed(1)}% of total tickets
+                      </p>
                     </div>
                   )}
                 </Card>
