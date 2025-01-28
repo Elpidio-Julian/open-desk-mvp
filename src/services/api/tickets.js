@@ -246,13 +246,13 @@ export const ticketsService = {
     try {
       const { data, error } = await supabase
         .from('custom_field_definitions')
-        .select('*')
+        .select('id, is_active')
         .eq('name', 'Issue Category')
-        .eq('is_active', true)
-        .single();
-
-      if (error && error.code !== 'PGRST116') throw error;
-      return !!data;
+        .eq('content_type', 'field')
+        .limit(1);
+      
+      // Return true only if we found an active Issue Category field
+      return data && data.length > 0 && data[0].is_active;
     } catch (error) {
       console.error('Error checking issue category status:', error);
       return false;
@@ -265,11 +265,11 @@ export const ticketsService = {
         .from('custom_field_definitions')
         .select('options')
         .eq('name', 'Issue Category')
-        .eq('is_active', true)
-        .single();
+        .eq('content_type', 'field')
+        .limit(1);
 
-      if (error) throw error;
-      return data?.options || [];
+      // Return options array if found, empty array otherwise
+      return (data && data.length > 0) ? data[0].options || [] : [];
     } catch (error) {
       console.error('Error fetching issue categories:', error);
       return [];

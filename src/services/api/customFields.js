@@ -59,7 +59,7 @@ export const customFieldsService = {
         .select('*')
         .eq('name', name)
         .maybeSingle();
-
+      
       if (!data) {
         return { data: null, error: { code: 'PGRST116', message: 'No data found' } };
       }
