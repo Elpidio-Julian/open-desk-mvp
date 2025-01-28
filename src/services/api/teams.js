@@ -22,12 +22,12 @@ export const teamsService = {
     return { data, error };
   },
 
-  createTeam: async ({ name, focusArea }) => {
+  createTeam: async ({ name, metadata }) => {
     const { data, error } = await supabase
       .from('teams')
       .insert({
         name,
-        focus_area: focusArea
+        metadata
       })
       .select()
       .single();
@@ -35,13 +35,26 @@ export const teamsService = {
     return { data, error };
   },
 
-  updateTeam: async (teamId, { name, focusArea }) => {
+  updateTeam: async (teamId, { name, metadata }) => {
+    // Get current team data first
+    const { data: currentTeam } = await supabase
+      .from('teams')
+      .select('metadata')
+      .eq('id', teamId)
+      .single();
+
+    // Prepare update data
+    const updateData = {
+      name,
+      metadata: {
+        ...(currentTeam?.metadata || {}),
+        ...metadata
+      }
+    };
+
     const { data, error } = await supabase
       .from('teams')
-      .update({
-        name,
-        focus_area: focusArea
-      })
+      .update(updateData)
       .eq('id', teamId)
       .select()
       .single();
@@ -65,9 +78,12 @@ export const teamsService = {
         *,
         agents:agents(
           id,
-          full_name,
-          email,
-          role
+          profile:profile_id(
+            id,
+            full_name,
+            email,
+            role
+          )
         )
       `)
       .eq('id', teamId)
@@ -79,9 +95,12 @@ export const teamsService = {
           team: {
             id: data.id,
             name: data.name,
-            focus_area: data.focus_area
+            metadata: data.metadata
           },
-          members: data.agents || [],
+          members: data.agents?.map(agent => ({
+            id: agent.id,
+            profile: agent.profile
+          })) || [],
           skills: data.skills || []
         },
         error: null
@@ -148,22 +167,30 @@ export const teamsService = {
 
   // Agent operations for teams
   getAvailableAgents: async (teamId, search = '') => {
-    // Get agents not already in the team
+    // First get the list of profile IDs already in the team
+    const { data: existingMembers } = await supabase
+      .from('agents')
+      .select('profile_id')
+      .eq('team_id', teamId);
+
+    const existingIds = existingMembers?.map(m => m.profile_id) || [];
+
+    // Then get all eligible profiles not in the team
     let query = supabase
       .from('profiles')
       .select('id, full_name, email, role')
-      .in('role', ['agent', 'admin'])
-      .not('id', 'in', (qb) => 
-        qb.from('agents')
-          .select('profile_id')
-          .eq('team_id', teamId)
-      )
-      .order('full_name');
+      .in('role', ['agent', 'admin']);
+
+    if (existingIds.length > 0) {
+      query = query.not('id', 'in', existingIds);
+    }
 
     // Add search filter if provided
     if (search) {
       query = query.ilike('full_name', `%${search}%`);
     }
+
+    query = query.order('full_name');
 
     const { data, error } = await query;
     return { data, error, count: data?.length || 0 };

@@ -11,11 +11,20 @@ CREATE TABLE IF NOT EXISTS teams (
 ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
 
 -- Create policies
-CREATE POLICY "Allow read access to all users" ON teams
-    FOR SELECT USING (true);
+CREATE POLICY "Allow read access to all authenticated users" ON teams
+    FOR SELECT 
+    TO authenticated
+    USING (true);
 
 CREATE POLICY "Allow all access to admins" ON teams
-    FOR ALL USING (auth.jwt() ->> 'role' = 'admin');
+    FOR ALL 
+    TO authenticated
+    USING (
+        EXISTS (
+            SELECT 1 FROM profiles
+            WHERE id = auth.uid() AND role = 'admin'
+        )
+    );
 
 -- Create updated_at trigger
 CREATE TRIGGER set_teams_updated_at

@@ -16,12 +16,7 @@ import {
 } from "../ui/dialog";
 import { useDebounce } from '../../hooks/useDebounce';
 import { teamsService } from '../../services/api/teams';
-
-const FOCUS_AREAS = [
-  { value: 'technical', label: 'Technical Support' },
-  { value: 'billing', label: 'Billing Support' },
-  { value: 'general', label: 'General Support' }
-];
+import { customFieldsService } from '../../services/api/customFields';
 
 const COMMON_SKILLS = [
   'JavaScript', 'Python', 'Database', 'Networking',
@@ -31,6 +26,7 @@ const COMMON_SKILLS = [
 
 const TeamManagement = () => {
   const [teams, setTeams] = useState([]);
+  const [focusAreas, setFocusAreas] = useState([]);
   const [agents, setAgents] = useState({});
   const [selectedAgents, setSelectedAgents] = useState({});
   const [loading, setLoading] = useState(false);
@@ -44,7 +40,31 @@ const TeamManagement = () => {
 
   useEffect(() => {
     fetchTeamsAndAgents();
+    fetchFocusAreas();
   }, []);
+
+  const fetchFocusAreas = async () => {
+    try {
+      const { data: field, error } = await customFieldsService.getFieldByName('Focus Areas');
+      if (error && error.code !== 'PGRST116') throw error;
+      
+      if (field?.options && Object.keys(field.options).length > 0) {
+        // Convert options object to array of { value, label } pairs
+        const areas = Object.entries(field.options).map(([key, value]) => ({
+          value: key,
+          label: value
+        }));
+        setFocusAreas(areas);
+      } else {
+        // If no focus areas are set, clear the array
+        setFocusAreas([]);
+      }
+    } catch (err) {
+      console.error('Error fetching focus areas:', err);
+      setFocusAreas([]); // Clear focus areas on error
+      setError(err.message);
+    }
+  };
 
   const fetchTeamsAndAgents = async () => {
     try {
@@ -95,7 +115,27 @@ const TeamManagement = () => {
       setLoading(true);
       setError(null);
 
-      const { error } = await teamsService.createTeam(newTeam);
+      // Get the focus area value and label
+      let focusAreaValue = 'general';
+      let focusAreaLabel = 'General Support';
+
+      if (focusAreas.length > 0 && newTeam.focusArea) {
+        const selectedArea = focusAreas.find(area => area.value === newTeam.focusArea);
+        focusAreaValue = selectedArea.value;
+        focusAreaLabel = selectedArea.label;
+      }
+
+      const teamData = {
+        name: newTeam.name,
+        metadata: {
+          focus_area: {
+            value: focusAreaValue,
+            label: focusAreaLabel
+          }
+        }
+      };
+
+      const { error } = await teamsService.createTeam(teamData);
       if (error) throw error;
 
       await fetchTeamsAndAgents();
@@ -153,8 +193,30 @@ const TeamManagement = () => {
   const updateTeam = async (teamId, updatedData) => {
     try {
       setError(null);
-      const { error } = await teamsService.updateTeam(teamId, updatedData);
+
+      // Get the focus area value and label
+      let focusAreaValue = 'general';
+      let focusAreaLabel = 'General Support';
+
+      if (focusAreas.length > 0 && updatedData.focusArea) {
+        const selectedArea = focusAreas.find(area => area.value === updatedData.focusArea);
+        focusAreaValue = selectedArea.value;
+        focusAreaLabel = selectedArea.label;
+      }
+
+      const teamData = {
+        name: updatedData.name,
+        metadata: {
+          focus_area: {
+            value: focusAreaValue,
+            label: focusAreaLabel
+          }
+        }
+      };
+
+      const { error } = await teamsService.updateTeam(teamId, teamData);
       if (error) throw error;
+      
       await fetchTeamsAndAgents();
       setEditingTeam(null);
     } catch (err) {
@@ -231,22 +293,24 @@ const TeamManagement = () => {
             value={newTeam.name}
             onChange={(e) => setNewTeam({ ...newTeam, name: e.target.value })}
           />
-          <Select
-            value={newTeam.focusArea}
-            onValueChange={(value) => setNewTeam({ ...newTeam, focusArea: value })}
-          >
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Select Focus Area" />
-            </SelectTrigger>
-            <SelectContent>
-              {FOCUS_AREAS.map(({ value, label }) => (
-                <SelectItem key={value} value={value}>{label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {focusAreas.length > 0 && (
+            <Select
+              value={newTeam.focusArea}
+              onValueChange={(value) => setNewTeam({ ...newTeam, focusArea: value })}
+            >
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="Select Focus Area" />
+              </SelectTrigger>
+              <SelectContent>
+                {focusAreas.map(({ value, label }) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <Button
             onClick={createTeam}
-            disabled={!newTeam.name || !newTeam.focusArea}
+            disabled={!newTeam.name || (focusAreas.length > 0 && !newTeam.focusArea)}
           >
             Create Team
           </Button>
@@ -260,9 +324,11 @@ const TeamManagement = () => {
             <div className="flex justify-between items-start mb-4">
               <div>
                 <h4 className="font-semibold">{team.name}</h4>
-                <p className="text-sm text-muted-foreground capitalize">
-                  {team.focus_area.replace(/_/g, ' ')}
-                </p>
+                {team.metadata?.focus_area && (
+                  <p className="text-sm text-muted-foreground capitalize">
+                    {team.metadata.focus_area.label}
+                  </p>
+                )}
               </div>
               <div className="flex items-start gap-2">
                 <div className="text-sm text-muted-foreground text-right">
@@ -428,7 +494,10 @@ const TeamManagement = () => {
           <DialogHeader>
             <DialogTitle>Edit Team</DialogTitle>
             <DialogDescription>
-              Update the team's name and focus area.
+              {focusAreas.length > 0 
+                ? "Update the team's name and focus area."
+                : "Update the team's name."
+              }
             </DialogDescription>
           </DialogHeader>
           {editingTeam && (
@@ -442,25 +511,30 @@ const TeamManagement = () => {
                   }
                 />
               </div>
-              <div className="space-y-2">
-                <Select
-                  value={editingTeam.focus_area}
-                  onValueChange={(value) =>
-                    setEditingTeam({ ...editingTeam, focus_area: value })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select Focus Area" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FOCUS_AREAS.map(({ value, label }) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {focusAreas.length > 0 && (
+                <div className="space-y-2">
+                  <Select
+                    value={editingTeam.metadata?.focus_area?.value}
+                    onValueChange={(value) =>
+                      setEditingTeam({
+                        ...editingTeam,
+                        focusArea: value
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Focus Area" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {focusAreas.map(({ value, label }) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
           )}
           <DialogFooter>
@@ -471,10 +545,10 @@ const TeamManagement = () => {
               onClick={() =>
                 updateTeam(editingTeam.id, {
                   name: editingTeam.name,
-                  focusArea: editingTeam.focus_area,
+                  focusArea: editingTeam.metadata?.focus_area?.value || editingTeam.focusArea
                 })
               }
-              disabled={!editingTeam?.name || !editingTeam?.focus_area}
+              disabled={!editingTeam?.name || (focusAreas.length > 0 && !editingTeam?.metadata?.focus_area?.value && !editingTeam?.focusArea)}
             >
               Save Changes
             </Button>
