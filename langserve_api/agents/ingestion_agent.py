@@ -8,6 +8,7 @@ from uuid import UUID
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from typing import TypeVar, Sequence
+from langsmith import traceable
 from .tools.priority_tool import PriorityAssessmentTool
 from .tools.category_tool import CategoryClassificationTool
 from .tools.tag_tool import TagExtractionTool
@@ -23,6 +24,7 @@ class AgentState(TypedDict):
     error: Optional[str]  # Error message if any
     status: str  # Current status of processing
 
+@traceable(name="Ticket Ingestion Agent")
 class IngestionAgent:
     """Agent responsible for structuring incoming ticket data and preparing for vector storage."""
     
@@ -52,6 +54,7 @@ class IngestionAgent:
         try:
             title = state["ticket"]["title"]
             description = state["ticket"]["description"]
+            creator_id = state["ticket"].get("creator_id")  # Get creator_id from raw ticket
             
             # Use tools to analyze ticket
             try:
@@ -77,7 +80,8 @@ class IngestionAgent:
                 technical_terms=tag_result.get("technical_terms", []),
                 key_entities=tag_result.get("key_entities", []),
                 browser=tag_result.get("browser"),
-                platform=tag_result.get("platform")
+                platform=tag_result.get("platform"),
+                creator_id=UUID(creator_id) if creator_id else None  # Add creator_id to metadata
             )
             
             # Create processed ticket
@@ -86,15 +90,9 @@ class IngestionAgent:
                 description=description,
                 priority=priority_result["priority"],
                 status="processed",
-                metadata=new_metadata
+                metadata=new_metadata,
+                creator_id=UUID(creator_id) if creator_id else None  # Set creator_id on ticket
             )
-            
-            # Set creator_id if available in context
-            if state["context"].get("creator_id"):
-                try:
-                    ticket_data.creator_id = UUID(state["context"]["creator_id"])
-                except ValueError as e:
-                    print(f"Warning: Invalid creator_id format: {e}")
             
             # Update state
             state["processed_ticket"] = ticket_data
@@ -125,14 +123,16 @@ class IngestionAgent:
                 
                 # Update ticket metadata with merged result
                 state["processed_ticket"].metadata = TicketMetadata(**merged_result["metadata"])
-            
-            # Add context information if available
-            if state["context"].get("creator_id"):
-                try:
-                    state["processed_ticket"].creator_id = UUID(state["context"]["creator_id"])
-                except ValueError as e:
-                    print(f"Warning: Invalid creator_id format: {e}")
                 
+                # Preserve creator_id from raw ticket data if available
+                if state["ticket"].get("creator_id"):
+                    try:
+                        creator_id = UUID(state["ticket"]["creator_id"])
+                        state["processed_ticket"].metadata.creator_id = creator_id
+                        state["processed_ticket"].creator_id = creator_id
+                    except ValueError as e:
+                        print(f"Warning: Invalid creator_id format: {e}")
+            
             state["status"] = "completed"
             return state
             
@@ -190,16 +190,22 @@ class IngestionAgent:
         
         return workflow.compile()
 
+    @traceable(name="Process Ticket")
     async def process_ticket(
         self,
         title: str,
         description: str,
         existing_metadata: Dict[str, Any] = None,
-        context: Dict[str, Any] = None
+        context: Dict[str, Any] = None,
+        creator_id: str = None
     ) -> TicketData:
         """Process incoming ticket using the workflow."""
         initial_state: AgentState = {
-            "ticket": {"title": title, "description": description},
+            "ticket": {
+                "title": title,
+                "description": description,
+                "creator_id": creator_id
+            },
             "metadata": existing_metadata or {},
             "context": context or {},
             "processed_ticket": None,
@@ -213,10 +219,12 @@ class IngestionAgent:
         # Return the processed ticket
         return final_state["processed_ticket"]
             
+    @traceable(name="Generate Embeddings")
     async def get_embeddings(self, text: str) -> List[float]:
         """Generate embeddings for text using OpenAI."""
         return await self.embeddings.aembed_query(text)
         
+    @traceable(name="Prepare for Vector DB")
     async def prepare_for_vectordb(self, ticket: TicketData) -> Dict[str, Any]:
         """Prepare ticket for storage in ChromaDB."""
         # Convert ticket to document format

@@ -174,15 +174,12 @@ async def test_process_ticket_with_metadata(ingestion_agent, sample_tickets, sam
 async def test_process_ticket_with_context(ingestion_agent, sample_tickets):
     """Test ticket processing with context information."""
     ticket = sample_tickets[0]
-    context = {
-        "creator_id": "8284f8bf-3228-410d-912e-e5ea21546b94",
-        "subscription_tier": "premium"
-    }
+    creator_id = "8284f8bf-3228-410d-912e-e5ea21546b94"
     
     result = await ingestion_agent.process_ticket(
         title=ticket["title"],
         description=ticket["description"],
-        context=context
+        creator_id=creator_id
     )
     
     debug_info = debug_ticket_processing(
@@ -192,7 +189,8 @@ async def test_process_ticket_with_context(ingestion_agent, sample_tickets):
         ticket
     )
     
-    assert result.creator_id == UUID(context["creator_id"]), f"Creator ID not set correctly.\n{debug_info}"
+    assert result.creator_id == UUID(creator_id), f"Creator ID not set correctly.\n{debug_info}"
+    assert result.metadata.creator_id == UUID(creator_id), f"Creator ID not set in metadata.\n{debug_info}"
 
 @pytest.mark.asyncio
 async def test_prepare_for_vectordb(ingestion_agent, sample_tickets):
