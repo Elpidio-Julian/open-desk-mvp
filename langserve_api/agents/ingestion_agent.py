@@ -1,76 +1,27 @@
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, TypedDict, Annotated
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate
 from langchain.output_parsers import PydanticOutputParser
 from langchain_openai import OpenAIEmbeddings
 from uuid import UUID
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode
+from typing import TypeVar, Sequence
+from .tools.priority_tool import PriorityAssessmentTool
+from .tools.category_tool import CategoryClassificationTool
+from .tools.tag_tool import TagExtractionTool
+from .tools.metadata_tool import MetadataEnrichmentTool
+from .models import TicketData, TicketMetadata
 
-class TicketMetadata(BaseModel):
-    """Dynamic metadata model that can handle various fields."""
-    Issue_Category: Optional[str] = None
-    ticket_tags: list[str] = []
-    product_area: Optional[str] = None
-    browser: Optional[str] = None
-    platform: Optional[str] = None
-    urgency_indicators: list[str] = []
-    key_entities: list[str] = []
-    technical_terms: list[str] = []
-    
-    # Allow additional fields
-    model_config = ConfigDict(extra='allow')
-
-class TicketData(BaseModel):
-    """Ticket model matching Supabase structure with additional processing fields."""
-    id: Optional[UUID] = None
-    title: str
-    description: str
-    status: str = "new"
-    priority: str
-    creator_id: Optional[UUID] = None
-    assigned_agent_id: Optional[UUID] = None
-    metadata: TicketMetadata = Field(default_factory=TicketMetadata)
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    resolved_at: Optional[datetime] = None
-
-    def get_text_for_embedding(self) -> str:
-        """Get formatted text for generating embeddings."""
-        metadata = self.metadata
-        tags = " ".join(metadata.ticket_tags) if metadata.ticket_tags else ""
-        technical = " ".join(metadata.technical_terms) if metadata.technical_terms else ""
-        
-        # Combine relevant fields for embedding
-        text_parts = [
-            self.title,
-            self.description,
-            f"priority: {self.priority}",
-            f"category: {metadata.Issue_Category}" if metadata.Issue_Category else "",
-            f"product: {metadata.product_area}" if metadata.product_area else "",
-            f"tags: {tags}" if tags else "",
-            f"technical details: {technical}" if technical else ""
-        ]
-        
-        return " ".join([part for part in text_parts if part])
-
-    def to_chroma_document(self) -> Dict[str, Any]:
-        """Convert ticket to ChromaDB document format."""
-        return {
-            "id": str(self.id) if self.id else None,
-            "text": self.get_text_for_embedding(),
-            "metadata": {
-                "title": self.title,
-                "priority": self.priority,
-                "status": self.status,
-                "creator_id": str(self.creator_id) if self.creator_id else None,
-                "category": self.metadata.Issue_Category,
-                "product_area": self.metadata.product_area,
-                "tags": self.metadata.ticket_tags,
-                "created_at": self.created_at.isoformat() if self.created_at else None,
-                "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None
-            }
-        }
+class AgentState(TypedDict):
+    """State for the ticket processing workflow."""
+    ticket: Dict[str, Any]  # Raw ticket data
+    metadata: Dict[str, Any]  # Existing metadata
+    context: Dict[str, Any]  # Additional context
+    processed_ticket: Optional[TicketData]  # Processed ticket data
+    error: Optional[str]  # Error message if any
+    status: str  # Current status of processing
 
 class IngestionAgent:
     """Agent responsible for structuring incoming ticket data and preparing for vector storage."""
@@ -80,46 +31,165 @@ class IngestionAgent:
         self.output_parser = PydanticOutputParser(pydantic_object=TicketData)
         self.embeddings = OpenAIEmbeddings()
         
-        # Create the chat prompt template
-        self.prompt = ChatPromptTemplate.from_messages([
-            SystemMessagePromptTemplate.from_template("""You are an expert ticket processing agent. 
-            Analyze the ticket information and structure it according to these rules:
-
-            1. Priority Assessment:
-               - HIGH: Security issues, system-wide errors, login problems, data loss
-               - MEDIUM: Feature malfunctions, performance issues, UI problems
-               - LOW: Feature requests, documentation, cosmetic issues
-
-            2. Issue Category Assignment:
-               - Authentication: Login, access, permissions
-               - Technical: Errors, system issues, integrations
-               - Billing: Payment, subscription, pricing
-               - Account Management: Profile, settings, preferences
-               - Feature Request: New features, improvements
-               - Bug: Software defects, unexpected behavior
-               - Performance: Speed, resource usage
-               - Documentation: Help, guides, explanations
-
-            3. Metadata Enhancement:
-               - Add relevant ticket_tags based on content
-               - Identify product areas mentioned
-               - Extract browser/platform information
-               - List technical terms and error codes
-               - Note urgency indicators
-               - Identify key entities (features, components)
-
-            Format the output exactly according to the specified schema.
-            Ensure all metadata fields are properly categorized and tagged.
-            Keep the original metadata fields if provided, but enhance them with additional information."""),
-            HumanMessagePromptTemplate.from_template("""Analyze this ticket:
-            Title: {title}
-            Description: {description}
-            Current Metadata: {metadata}
-            Additional Context: {context}
-            
-            Structure this information according to the specified format, preserving any existing metadata fields.""")
+        # Initialize tools
+        self.priority_tool = PriorityAssessmentTool()
+        self.category_tool = CategoryClassificationTool()
+        self.tag_tool = TagExtractionTool()
+        self.metadata_tool = MetadataEnrichmentTool()
+        
+        # Create tool node
+        self.tools = ToolNode(tools=[
+            self.priority_tool,
+            self.category_tool,
+            self.tag_tool,
+            self.metadata_tool
         ])
         
+        self.workflow = self._create_workflow()
+
+    async def _process_ticket_node(self, state: AgentState) -> AgentState:
+        """Process the ticket and update state."""
+        try:
+            title = state["ticket"]["title"]
+            description = state["ticket"]["description"]
+            
+            # Use tools to analyze ticket
+            try:
+                priority_result = await self.priority_tool.arun(title=title, description=description)
+                category_result = await self.category_tool.arun(title=title, description=description)
+                tag_result = await self.tag_tool.arun(title=title, description=description)
+            except Exception as tool_error:
+                print(f"Tool execution failed: {str(tool_error)}")
+                raise ValueError(f"Tool execution failed: {str(tool_error)}")
+            
+            # Validate tool results
+            if not priority_result or not priority_result.get("priority") in ["high", "medium", "low"]:
+                raise ValueError(f"Invalid priority: {priority_result.get('priority') if priority_result else None}")
+            if not category_result or not category_result.get("category"):
+                raise ValueError("Missing category in tool result")
+            if not tag_result or not tag_result.get("tags"):
+                raise ValueError("Missing tags in tool result")
+            
+            # Create initial metadata
+            new_metadata = TicketMetadata(
+                Issue_Category=category_result["category"],
+                ticket_tags=tag_result["tags"],
+                technical_terms=tag_result.get("technical_terms", []),
+                key_entities=tag_result.get("key_entities", []),
+                browser=tag_result.get("browser"),
+                platform=tag_result.get("platform")
+            )
+            
+            # Create processed ticket
+            ticket_data = TicketData(
+                title=title,
+                description=description,
+                priority=priority_result["priority"],
+                status="processed",
+                metadata=new_metadata
+            )
+            
+            # Set creator_id if available in context
+            if state["context"].get("creator_id"):
+                try:
+                    ticket_data.creator_id = UUID(state["context"]["creator_id"])
+                except ValueError as e:
+                    print(f"Warning: Invalid creator_id format: {e}")
+            
+            # Update state
+            state["processed_ticket"] = ticket_data
+            state["status"] = "processed"
+            return state
+            
+        except Exception as e:
+            print(f"Error in process_ticket_node: {str(e)}")
+            state["error"] = str(e)
+            state["status"] = "error"
+            return state
+
+    async def _merge_metadata_node(self, state: AgentState) -> AgentState:
+        """Merge existing metadata with processed metadata."""
+        if state["status"] == "error" or not state["processed_ticket"]:
+            return state
+            
+        try:
+            if state["metadata"]:
+                # Use metadata enrichment tool
+                merged_result = await self.metadata_tool.arun(
+                    existing_metadata=state["metadata"],
+                    new_metadata=state["processed_ticket"].metadata.model_dump()
+                )
+                
+                if not merged_result or "metadata" not in merged_result:
+                    raise ValueError("Invalid metadata merge result")
+                
+                # Update ticket metadata with merged result
+                state["processed_ticket"].metadata = TicketMetadata(**merged_result["metadata"])
+            
+            # Add context information if available
+            if state["context"].get("creator_id"):
+                try:
+                    state["processed_ticket"].creator_id = UUID(state["context"]["creator_id"])
+                except ValueError as e:
+                    print(f"Warning: Invalid creator_id format: {e}")
+                
+            state["status"] = "completed"
+            return state
+            
+        except Exception as e:
+            print(f"Error in merge_metadata_node: {str(e)}")
+            state["error"] = str(e)
+            state["status"] = "error"
+            return state
+
+    async def _handle_error_node(self, state: AgentState) -> AgentState:
+        """Handle errors by creating a fallback ticket."""
+        if state["status"] != "error":
+            return state
+            
+        # Create fallback ticket
+        fallback_ticket = TicketData(
+            title=state["ticket"]["title"],
+            description=state["ticket"]["description"],
+            status="new",
+            priority="medium",
+            metadata=TicketMetadata(**state["metadata"]) if state["metadata"] else TicketMetadata()
+        )
+        
+        state["processed_ticket"] = fallback_ticket
+        state["status"] = "completed"
+        return state
+
+    def _should_handle_error(self, state: AgentState) -> bool:
+        """Determine if error handling is needed."""
+        return state["status"] == "error"
+
+    def _create_workflow(self) -> StateGraph:
+        """Create the workflow graph."""
+        workflow = StateGraph(AgentState)
+        
+        # Add nodes
+        workflow.add_node("process_ticket", self._process_ticket_node)
+        workflow.add_node("merge_metadata", self._merge_metadata_node)
+        workflow.add_node("handle_error", self._handle_error_node)
+        
+        # Add edges
+        workflow.add_edge("process_ticket", "merge_metadata")
+        workflow.add_conditional_edges(
+            "merge_metadata",
+            self._should_handle_error,
+            {
+                True: "handle_error",
+                False: END
+            }
+        )
+        workflow.add_edge("handle_error", END)
+        
+        # Set entry point
+        workflow.set_entry_point("process_ticket")
+        
+        return workflow.compile()
+
     async def process_ticket(
         self,
         title: str,
@@ -127,52 +197,21 @@ class IngestionAgent:
         existing_metadata: Dict[str, Any] = None,
         context: Dict[str, Any] = None
     ) -> TicketData:
-        """Process incoming ticket and return structured data."""
-        if context is None:
-            context = {}
-        if existing_metadata is None:
-            existing_metadata = {}
-            
-        # Format the conversation with the ticket details
-        messages = self.prompt.format_messages(
-            title=title,
-            description=description,
-            metadata=str(existing_metadata),
-            context=str(context)
-        )
+        """Process incoming ticket using the workflow."""
+        initial_state: AgentState = {
+            "ticket": {"title": title, "description": description},
+            "metadata": existing_metadata or {},
+            "context": context or {},
+            "processed_ticket": None,
+            "error": None,
+            "status": "started"
+        }
         
-        # Get structured response from LLM
-        response = await self.llm.agenerate([messages])
-        result = response.generations[0][0].text
+        # Run the workflow
+        final_state = await self.workflow.ainvoke(initial_state)
         
-        try:
-            # Parse the response into our TicketData structure
-            ticket_data = self.output_parser.parse(result)
-            
-            # Preserve existing metadata fields and merge with new ones
-            if existing_metadata:
-                # Create a new metadata instance with existing data
-                merged_metadata = {**existing_metadata}
-                # Update with new fields from LLM processing
-                merged_metadata.update(ticket_data.metadata.dict(exclude_unset=True))
-                # Update ticket metadata
-                ticket_data.metadata = TicketMetadata(**merged_metadata)
-            
-            # Add context information if available
-            if context.get("creator_id"):
-                ticket_data.creator_id = UUID(context["creator_id"])
-                
-            return ticket_data
-            
-        except Exception as e:
-            # Fallback to basic structure if parsing fails
-            return TicketData(
-                title=title,
-                description=description,
-                status="new",
-                priority="medium",
-                metadata=TicketMetadata(**existing_metadata) if existing_metadata else TicketMetadata()
-            )
+        # Return the processed ticket
+        return final_state["processed_ticket"]
             
     async def get_embeddings(self, text: str) -> List[float]:
         """Generate embeddings for text using OpenAI."""
