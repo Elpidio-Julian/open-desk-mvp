@@ -1,6 +1,0 @@
-setup.py
-ticket_agent.egg-info/PKG-INFO
-ticket_agent.egg-info/SOURCES.txt
-ticket_agent.egg-info/dependency_links.txt
-ticket_agent.egg-info/requires.txt
-ticket_agent.egg-info/top_level.txt

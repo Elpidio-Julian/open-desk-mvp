@@ -33,6 +33,7 @@ dist-ssr
 /notes/
 
 ticket_agent/.venv
+langserve_api/venv
 
 __pycache__/
 
