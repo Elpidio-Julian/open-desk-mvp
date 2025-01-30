@@ -56,12 +56,8 @@ class RequiredSkills(BaseModel):
 class ClassificationDecision(BaseModel):
     """Complete classification of a ticket."""
     can_auto_resolve: bool = Field(description="Whether the ticket can be automatically resolved")
-    confidence_score: float = Field(description="Confidence in the classification decision (0-1)")
     routing_team: TeamData = Field(description="Team that should handle this ticket")
-    required_skills: RequiredSkills = Field(description="Skills required to handle the ticket")
-    reasoning: str = Field(description="Explanation for the classification decision")
-    needs_more_info: bool = Field(description="Whether more information is needed from the user")
-    estimated_complexity: str = Field(description="Estimated complexity: simple, medium, complex")
+    confidence_score: float = Field(description="Confidence in the classification decision (0-1)")
     auto_resolution_steps: Optional[List[str]] = Field(description="Steps for auto-resolution if applicable", default=None)
 
 @traceable(name="Ticket Classifier Agent")
@@ -126,104 +122,130 @@ class ClassifierAgent:
         ])
     
     async def _get_teams(self, force_refresh: bool = False) -> List[TeamData]:
-        """Get teams data from PostgREST with caching and error handling."""
-        current_time = datetime.now().timestamp()
+        """Get all teams from the database."""
+        print("\n=== _get_teams method started ===")
         
-        # Return cached data if valid
-        if not force_refresh and self._teams_cache and self._teams_cache_timestamp:
-            if current_time - self._teams_cache_timestamp < self._cache_ttl:
-                return self._teams_cache
-        
+        if not force_refresh and self._teams_cache:
+            print("Using cached teams data")
+            return self._teams_cache
+
+        print("Fetching fresh teams data from PostgREST...")
         try:
-            # Fetch fresh data from PostgREST
+            print("Created PostgREST query")
             response = await self.postgrest.from_("teams").select("*").execute()
+            print("Executed select query")
+            print(f"Got response with data: {response.data}")
+
+            # Convert response data to TeamData objects
+            teams = []
+            for team_data in response.data:
+                if isinstance(team_data, TeamData):
+                    teams.append(team_data)
+                else:
+                    teams.append(TeamData(**team_data))
             
-            if not response.data:
-                logger.warning("No teams found in database, using default team")
-                return [TeamData.get_default_team()]
+            if teams:
+                self._teams_cache = teams
+                return teams
             
-            # Parse and cache the teams data
-            teams = [TeamData(**team_data) for team_data in response.data]
-            self._teams_cache = teams
-            self._teams_cache_timestamp = current_time
-            
-            return teams
-            
-        except httpx.HTTPError as e:
-            logger.error(f"HTTP error fetching teams: {str(e)}")
-            if self._teams_cache:
-                logger.info("Using cached team data due to HTTP error")
-                return self._teams_cache
-            return [TeamData.get_default_team()]
-            
+            # Return default team if no teams found
+            default_team = TeamData(
+                id="default",
+                name="General Support",
+                description="Default team for handling tickets when no other teams are available",
+                metadata={
+                    "focus_area": {"value": "general", "label": "General Support"},
+                    "Skills": ["general support"],
+                    "technical_level": "junior"
+                },
+                created_at=datetime.now(),
+                updated_at=datetime.now()
+            )
+            return [default_team]
+
         except Exception as e:
-            logger.error(f"Unexpected error fetching teams: {str(e)}")
-            if self._teams_cache:
-                logger.info("Using cached team data due to unexpected error")
-                return self._teams_cache
-            return [TeamData.get_default_team()]
+            print(f"Unexpected error fetching teams: {str(e)}")
+            # Return default team on error
+            default_team = TeamData(
+                id="default",
+                name="General Support",
+                description="Default team for handling tickets when no other teams are available",
+                metadata={
+                    "focus_area": {"value": "general", "label": "General Support"},
+                    "Skills": ["general support"],
+                    "technical_level": "junior"
+                },
+                created_at=datetime.now(),
+                updated_at=datetime.now()
+            )
+            return [default_team]
 
     def _calculate_team_match_score(
         self,
         team: TeamData,
         category: str,
-        required_skills: RequiredSkills,
         ticket_tags: List[str]
     ) -> float:
         """Calculate how well a team matches the ticket requirements."""
         score = 0.0
         
         # Check focus area match
-        if team.metadata.get("focus_area", {}).get("value") == category.lower():
-            score += 0.4
-        elif team.metadata.get("focus_area", {}).get("value") == "general":
-            score += 0.1
+        team_focus = team.metadata.get("focus_area", {}).get("value", "").lower()
+        category = category.lower()
         
-        # Check skills match
-        team_skills = set(team.metadata.get("Skills", []))
-        required_skills_set = set(required_skills.tools_expertise)
-        if required_skills_set and team_skills:
-            skills_match_ratio = len(team_skills & required_skills_set) / len(required_skills_set)
-            score += 0.3 * skills_match_ratio
+        # Check if this is an unclear ticket
+        is_unclear = len(ticket_tags) <= 1 and category in ["technical", "general", "unknown", ""]
         
-        # Check technical level match
-        if team.metadata.get("technical_level") == required_skills.technical_level:
-            score += 0.3
+        if is_unclear and team_focus == "general":
+            # Unclear tickets should go to general support
+            score += 0.8
+        elif team_focus == category:
+            score += 0.7  # High score for exact category match
+        elif team_focus == "general":
+            score += 0.2  # Fallback option for other categories
         
         # Bonus for tag matches
         team_tags = set(team.metadata.get("tags", []))
         ticket_tags_set = set(ticket_tags)
         if ticket_tags_set and team_tags:
             tag_match_ratio = len(team_tags & ticket_tags_set) / len(ticket_tags_set)
-            score += 0.1 * tag_match_ratio
+            score += 0.3 * tag_match_ratio  # Tag matches are important but secondary
         
         return min(score, 1.0)
 
     async def _determine_routing_team(
         self,
         category: str,
-        required_skills: RequiredSkills,
         ticket_tags: List[str],
         can_auto_resolve: bool
     ) -> Tuple[TeamData, float]:
-        """Determine the appropriate team for routing using PostgREST team data. Returns team and match score."""
+        """Determine the appropriate team for routing."""
         try:
             teams = await self._get_teams()
             
             if can_auto_resolve:
                 # Find auto-resolution team
-                auto_teams = [t for t in teams if t.metadata.get("focus_area", {}).get("value") == "auto_resolution"]
+                auto_teams = [
+                    t for t in teams 
+                    if t.metadata.get("focus_area", {}).get("value") == "auto_resolution" or
+                    t.name == "Auto Resolution"
+                ]
                 if auto_teams:
                     return auto_teams[0], 1.0
             
             # Calculate match scores for each team
             team_scores = [
-                (team, self._calculate_team_match_score(team, category, required_skills, ticket_tags))
+                (team, self._calculate_team_match_score(team, category, ticket_tags))
                 for team in teams
             ]
             
             # Sort by score and get best match
             best_team, score = max(team_scores, key=lambda x: x[1])
+            
+            # If score is too low, fallback to default team
+            if score < 0.3:
+                return TeamData.get_default_team(), 0.5
+                
             return best_team, score
             
         except Exception as e:
@@ -250,171 +272,51 @@ class ClassifierAgent:
         self,
         ticket: TicketData,
         similar_tickets: List[SimilarTicket]
-    ) -> tuple[bool, float, Optional[List[str]]]:
-        """Analyze if the ticket can be auto-resolved based on patterns and similar tickets."""
-        # Auto-resolvable patterns
-        auto_resolvable_patterns = {
-            "password_reset": ["reset password", "forgot password", "change password"],
-            "account_activation": ["activate account", "account activation"],
-            "basic_troubleshooting": ["clear cache", "refresh browser", "restart application"]
-        }
+    ) -> Tuple[bool, List[str]]:
+        """Analyze if a ticket can be automatically resolved based on similar tickets."""
+        # Check if there are similar tickets that were auto-resolved
+        auto_resolved_tickets = [t for t in similar_tickets if t.auto_resolved]
+        if not auto_resolved_tickets:
+            return False, []
         
-        # Check for exact matches in similar tickets
-        similar_auto_resolved = [t for t in similar_tickets if t.auto_resolved]
-        if similar_auto_resolved:
-            most_similar = similar_auto_resolved[0]
-            if most_similar.similarity_score > 0.9:
-                return True, most_similar.similarity_score, most_similar.resolution_steps
+        # Calculate the average success rate of auto-resolved tickets
+        avg_success_rate = sum(t.success_rate for t in auto_resolved_tickets) / len(auto_resolved_tickets)
         
-        # Check patterns
-        text = f"{ticket.title.lower()} {ticket.description.lower()}"
-        for category, patterns in auto_resolvable_patterns.items():
-            if any(pattern in text for pattern in patterns):
-                if ticket.metadata.Issue_Category.lower() == category:
-                    return True, 0.85, self._get_standard_resolution_steps(category)
+        # Check if the category is typically auto-resolvable
+        auto_resolvable_categories = {"password_reset", "account_unlock", "mfa_reset"}
+        is_auto_resolvable_category = ticket.metadata.Issue_Category.lower() in auto_resolvable_categories
         
-        return False, 0.0, None
-    
-    def _get_standard_resolution_steps(self, category: str) -> List[str]:
-        """Get standard resolution steps for common categories."""
-        resolution_steps = {
-            "password_reset": [
-                "Verify user identity",
-                "Generate password reset link",
-                "Send reset email",
-                "Confirm reset completion"
-            ],
-            "account_activation": [
-                "Verify account exists",
-                "Generate activation link",
-                "Send activation email",
-                "Confirm activation"
-            ],
-            "basic_troubleshooting": [
-                "Provide clear cache instructions",
-                "Guide through browser refresh",
-                "Verify issue resolution",
-                "Offer additional support if needed"
-            ]
-        }
-        return resolution_steps.get(category, [])
-    
-    def _determine_required_skills(
-        self,
-        ticket: TicketData,
-        similar_tickets: List[SimilarTicket]
-    ) -> RequiredSkills:
-        """Determine required skills based on ticket content and similar tickets."""
-        # Extract technical terms and entities
-        technical_terms = set(ticket.metadata.technical_terms)
-        entities = set(ticket.metadata.key_entities)
+        # If success rate is high and category is auto-resolvable, extract steps
+        if avg_success_rate > 0.8 and is_auto_resolvable_category:
+            # Get the most successful auto-resolution steps
+            best_ticket = max(auto_resolved_tickets, key=lambda t: t.success_rate)
+            if best_ticket.resolution:
+                steps = [step.strip() for step in best_ticket.resolution.split('\n') if step.strip()]
+                return True, steps
         
-        # Analyze complexity
-        complex_indicators = {
-            "senior": ["architecture", "design", "scale", "performance", "security"],
-            "mid": ["api", "integration", "database", "workflow"],
-            "junior": ["ui", "typo", "display", "basic"]
-        }
-        
-        text = f"{ticket.title.lower()} {ticket.description.lower()}"
-        
-        # Determine technical level
-        technical_level = "junior"
-        for level, indicators in complex_indicators.items():
-            if any(indicator in text for indicator in indicators):
-                technical_level = level
-                break
-        
-        # Determine domain knowledge from similar tickets
-        domain_knowledge = set()
-        for t in similar_tickets:
-            if t.metadata and "domain" in t.metadata:
-                domain_knowledge.update(t.metadata["domain"])
-        
-        return RequiredSkills(
-            technical_level=technical_level,
-            domain_knowledge=list(domain_knowledge) if domain_knowledge else ["general"],
-            tools_expertise=list(technical_terms) if technical_terms else ["basic_support_tools"]
-        )
-    
+        return False, []
+
     @traceable(name="Classify Ticket")
     async def classify_ticket(
         self,
         ticket: TicketData,
         similar_tickets: List[SimilarTicket]
     ) -> ClassificationDecision:
-        """Classify ticket and determine routing."""
-        try:
-            # Analyze auto-resolution potential
-            can_auto_resolve, confidence, auto_steps = self._analyze_auto_resolution_potential(
-                ticket, similar_tickets
-            )
-            
-            # Determine required skills
-            required_skills = self._determine_required_skills(ticket, similar_tickets)
-            
-            # Format similar tickets for LLM analysis
-            similar_tickets_text = self._format_similar_tickets(similar_tickets)
-            
-            # Get LLM analysis for routing and complexity
-            llm_response = await self.llm.ainvoke(
-                self.classify_prompt.format_messages(
-                    title=ticket.title,
-                    description=ticket.description,
-                    priority=ticket.priority,
-                    category=ticket.metadata.Issue_Category,
-                    tags=ticket.metadata.ticket_tags,
-                    similar_tickets=similar_tickets_text
-                )
-            )
-            
-            # Extract complexity from LLM response
-            response_text = llm_response.content.lower()
-            complexity = "complex" if "complex" in response_text else "medium" if "medium" in response_text else "simple"
-            
-            # Determine routing team based on category and skills
-            routing_team, team_match_score = await self._determine_routing_team(
-                ticket.metadata.Issue_Category,
-                required_skills,
-                ticket.metadata.ticket_tags,
-                can_auto_resolve
-            )
-            
-            # Adjust confidence based on team match score
-            confidence = min(confidence, team_match_score)
-            
-            # Check if more information is needed
-            needs_more_info = (
-                "unclear" in response_text or
-                "more information" in response_text or
-                "need clarification" in response_text
-            )
-            
-            return ClassificationDecision(
-                can_auto_resolve=can_auto_resolve,
-                confidence_score=confidence,
-                routing_team=routing_team,
-                required_skills=required_skills,
-                reasoning=llm_response.content,
-                needs_more_info=needs_more_info,
-                estimated_complexity=complexity,
-                auto_resolution_steps=auto_steps if can_auto_resolve else None
-            )
-            
-        except Exception as e:
-            logger.error(f"Error in classify_ticket: {str(e)}")
-            # Return a safe fallback classification
-            return ClassificationDecision(
-                can_auto_resolve=False,
-                confidence_score=0.1,
-                routing_team=TeamData.get_default_team(),
-                required_skills=RequiredSkills(
-                    technical_level="junior",
-                    domain_knowledge=["general"],
-                    tools_expertise=["basic_support_tools"]
-                ),
-                reasoning=f"Error during classification: {str(e)}. Routing to general support.",
-                needs_more_info=True,
-                estimated_complexity="medium",
-                auto_resolution_steps=None
-            ) 
+        """Classify a ticket and determine routing and resolution approach."""
+        
+        # First, check if the ticket can be auto-resolved
+        can_auto_resolve, auto_steps = self._analyze_auto_resolution_potential(ticket, similar_tickets)
+        
+        # Determine routing team
+        team, confidence = await self._determine_routing_team(
+            ticket.metadata.Issue_Category,
+            ticket.metadata.ticket_tags,
+            can_auto_resolve
+        )
+        
+        return ClassificationDecision(
+            can_auto_resolve=can_auto_resolve,
+            routing_team=team,
+            confidence_score=confidence,
+            auto_resolution_steps=auto_steps if can_auto_resolve else None
+        ) 
