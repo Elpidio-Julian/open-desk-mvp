@@ -1,9 +1,11 @@
 from typing import Dict, Any, Optional, List
 from langchain.tools import Tool, StructuredTool
-from langchain.pydantic_v1 import BaseModel
+from pydantic import BaseModel
 from services.vector_store import VectorStore
 from supabase_client import SupabaseClient
 from langchain_openai import ChatOpenAI
+from langchain.chat_models.base import BaseChatModel
+from datetime import datetime
 
 class TicketInput(BaseModel):
     ticket_id: str
@@ -56,8 +58,34 @@ class ClassificationTool:
     def __init__(self, vector_store: VectorStore):
         self.vector_store = vector_store
         self.supabase = SupabaseClient()
-        self.auto_resolve_threshold = 0.85  # Confidence threshold for auto-resolution
-        self.llm = ChatOpenAI(temperature=0)
+        self.llm = ChatOpenAI()  # Initialize with default settings
+        self.auto_resolve_threshold = 0.8
+        self._teams_cache = None
+        self._teams_cache_time = None
+    
+    async def _get_available_teams(self) -> List[str]:
+        """Fetch available teams from the database with caching."""
+        # Cache teams for 5 minutes to avoid frequent db calls
+        current_time = datetime.utcnow()
+        if (self._teams_cache is not None and 
+            self._teams_cache_time is not None and 
+            (current_time - self._teams_cache_time).total_seconds() < 300):
+            return self._teams_cache
+
+        try:
+            # Fetch teams from Supabase
+            response = await self.supabase.client.table('teams').select('name').execute()
+            teams = [team['name'] for team in response.data]
+            
+            if not teams:  # Fallback if no teams configured
+                teams = ["general_support"]
+            
+            self._teams_cache = teams
+            self._teams_cache_time = current_time
+            return teams
+        except Exception as e:
+            print(f"Error fetching teams: {e}")
+            return ["general_support"]  # Fallback to general support on error
     
     async def _get_routing_rules(self) -> List[Dict[str, Any]]:
         """Get routing rules from custom_field_definitions table."""
@@ -150,16 +178,69 @@ Remember:
             print("LLM reasoning:", response.content.strip())
         return result
     
+    async def _infer_team_routing(self, rule: Dict[str, Any], ticket_data: Dict[str, Any]) -> str:
+        """Use LLM to infer the appropriate team based on rule description and ticket content."""
+        # Get current available teams
+        available_teams = await self._get_available_teams()
+        teams_description = "\n".join(f"- {team}" for team in available_teams)
+        
+        prompt = f"""You are determining which support team should handle a ticket based on its content and the matching rule.
+
+Rule Description:
+"{rule['description']}"
+
+Ticket Details:
+Title: {ticket_data.get('title')}
+Description: {ticket_data.get('description')}
+Priority: {ticket_data.get('priority')}
+Category: {ticket_data.get('metadata', {}).get('Issue Category')}
+Tags: {ticket_data.get('metadata', {}).get('tags', [])}
+
+Available Teams:
+{teams_description}
+
+Based on the rule description and ticket content, determine the most appropriate team to handle this ticket.
+Consider:
+1. The type of issue described
+2. Required expertise to handle the issue
+3. Historical handling of similar issues
+4. Complexity and technical depth needed
+
+Return ONLY ONE team name from the available teams list above, with no additional explanation."""
+
+        response = await self.llm.ainvoke(prompt)
+        team = response.content.strip().lower()
+        
+        # Validate team name against current available teams
+        if team not in available_teams:
+            print(f"Invalid team name returned by LLM: {team}, defaulting to {available_teams[0]}")
+            team = available_teams[0]
+            
+        print(f"Inferred team for rule '{rule['name']}': {team}")
+        return team
+
     async def classify_ticket(self, ticket_data: Dict[str, Any]) -> Dict[str, Any]:
         """Classify if a ticket can be auto-resolved based on routing rules and similar tickets."""
         try:
             print(f"\nClassifying ticket: {ticket_data}")
             if "error" in ticket_data:
-                print(f"Cannot classify ticket due to error: {ticket_data['error']}")
                 return {
                     "can_auto_resolve": False,
                     "confidence": 0.0,
-                    "error": ticket_data["error"]
+                    "error": ticket_data["error"],
+                    "metadata_updates": {
+                        "auto_resolution": {
+                            "is_auto_resolvable": False,
+                            "error": ticket_data["error"],
+                            "processed_at": datetime.utcnow().isoformat(),
+                            "status": "requires_human",
+                            "routing": {
+                                "team": await self._infer_team_routing({"name": "error", "description": "Error handling rule"}, ticket_data),
+                                "priority": "high",
+                                "reason": "retrieval_error"
+                            }
+                        }
+                    }
                 }
             
             # Get routing rules
@@ -167,54 +248,110 @@ Remember:
             
             # Check each rule
             for rule in rules:
-                # First check if ticket matches rule conditions
                 if self._check_conditions(ticket_data, rule):
                     print(f"Ticket matches conditions for rule: {rule['name']}")
                     
-                    # Then use LLM to determine if it should be auto-resolved
+                    # Infer team routing
+                    team = await self._infer_team_routing(rule, ticket_data)
+                    
                     if await self._should_auto_resolve(rule, ticket_data):
-                        # If rule says we can auto-resolve, check similar tickets for confidence
+                        # Find similar tickets for confidence check
                         query_text = f"{ticket_data.get('title', '')} {ticket_data.get('description', '')}"
                         similar_tickets = await self.vector_store.find_similar_documents(
                             query_text=query_text,
                             n_results=3
                         )
                         
-                        # Extract similarity scores
+                        # Calculate confidence from similarity scores
                         similarity_scores = [doc.get('similarity_score', 0) for doc in similar_tickets]
                         max_similarity = max(similarity_scores) if similarity_scores else 0
-                        
-                        # Final decision combines rules and similarity
                         can_auto_resolve = max_similarity >= self.auto_resolve_threshold
                         
-                        result = {
+                        # Prepare metadata structure
+                        metadata_updates = {
+                            "auto_resolution": {
+                                "is_auto_resolvable": can_auto_resolve,
+                                "confidence": max_similarity,
+                                "matching_rule": rule['name'],
+                                "processed_at": datetime.utcnow().isoformat(),
+                            }
+                        }
+                        
+                        if can_auto_resolve:
+                            metadata_updates["auto_resolution"].update({
+                                "status": "resolved",
+                                "resolution_type": "automatic",
+                                "resolution_details": {
+                                    "similar_tickets": [t["ticket_id"] for t in similar_tickets],
+                                    "reason": "high_confidence_match"
+                                }
+                            })
+                        else:
+                            metadata_updates["auto_resolution"].update({
+                                "status": "requires_human",
+                                "routing": {
+                                    "team": team,
+                                    "priority": ticket_data.get("priority", "medium"),
+                                    "reason": "low_confidence_match"
+                                }
+                            })
+                        
+                        return {
                             "can_auto_resolve": can_auto_resolve,
                             "confidence": max_similarity,
                             "similar_tickets": similar_tickets,
                             "matching_rule": rule['name'],
-                            "reason": "similarity_threshold" if can_auto_resolve else "low_confidence"
+                            "reason": "high_confidence_match" if can_auto_resolve else "low_confidence_match",
+                            "metadata_updates": metadata_updates
                         }
-                        print(f"Classification result: {result}")
-                        return result
-                    else:
-                        print(f"Rule {rule['name']} says not to auto-resolve")
-                else:
-                    print(f"Ticket does not match conditions for rule: {rule['name']}")
             
-            # If no rules match or none say to auto-resolve
+            # If no rules match, infer team from ticket content with a generic rule
+            default_rule = {
+                "name": "default",
+                "description": "Default routing rule for unmatched tickets"
+            }
+            default_team = await self._infer_team_routing(default_rule, ticket_data)
+            
             return {
                 "can_auto_resolve": False,
                 "confidence": 0.0,
                 "similar_tickets": [],
-                "reason": "no_matching_rules"
+                "reason": "no_matching_rules",
+                "metadata_updates": {
+                    "auto_resolution": {
+                        "is_auto_resolvable": False,
+                        "confidence": 0.0,
+                        "processed_at": datetime.utcnow().isoformat(),
+                        "status": "requires_human",
+                        "routing": {
+                            "team": default_team,
+                            "priority": ticket_data.get("priority", "medium"),
+                            "reason": "no_matching_rules"
+                        }
+                    }
+                }
             }
             
         except Exception as e:
-            print(f"Error classifying ticket: {str(e)}")
+            error_msg = str(e)
+            print(f"Error classifying ticket: {error_msg}")
             return {
                 "can_auto_resolve": False,
                 "confidence": 0.0,
-                "error": str(e)
+                "error": error_msg,
+                "metadata_updates": {
+                    "auto_resolution": {
+                        "is_auto_resolvable": False,
+                        "error": error_msg,
+                        "processed_at": datetime.utcnow().isoformat(),
+                        "status": "requires_human",
+                        "routing": {
+                            "team": "technical_support",  # Default to technical support for errors
+                            "priority": "high",
+                            "reason": "classification_error"
+                        }
+                    }
+                }
             }
 
 # Create tool instances

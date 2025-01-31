@@ -32,10 +32,11 @@ dist-ssr
 /plans/
 /notes/
 
-ticket_agent/.venv
-langserve_api/venv
+**/.venv
+langserve_api/.venv
+**/.pytest_cache
 
-__pycache__/
+**/__pycache__/
 
 # Python cache files
 __pycache__/

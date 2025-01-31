@@ -1,11 +1,5 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import Dict, Any, Optional, List
-from datetime import datetime
-from uuid import UUID
+from fastapi import FastAPI
 from services.vector_store import VectorStore
-from langserve import add_routes
-from langchain.chains import TransformChain
 from dotenv import load_dotenv
 from routers.ticket_router import router as ticket_router
 import os
