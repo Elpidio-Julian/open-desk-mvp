@@ -1,14 +1,11 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-import logging
 import chromadb
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 import json
 import os
-
-logger = logging.getLogger(__name__)
 
 class VectorStore:
     """Service class for managing ticket embeddings and similarity search using Chroma."""
@@ -47,7 +44,7 @@ class VectorStore:
         metadata_str = json.dumps(metadata)
         size_bytes = len(metadata_str.encode('utf-8'))
         if size_bytes > 30:
-            logger.warning(f"Metadata size ({size_bytes} bytes) exceeds limit of 30 bytes")
+            print(f"Metadata size ({size_bytes} bytes) exceeds limit of 30 bytes")
             # Truncate category if needed
             if "category" in metadata:
                 metadata["category"] = metadata["category"][:10]
@@ -68,9 +65,9 @@ class VectorStore:
         # Format the document content with metadata as JSON header
         return f"{json.dumps(doc_metadata)}\n\n{content}"
 
-    async def store_ticket(
+    async def store_document(
         self,
-        ticket_id: str,
+        document_id: str,
         content: str,
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
@@ -82,7 +79,7 @@ class VectorStore:
             filtered_metadata = {
                 "creator_id": metadata.get("creator_id"),
                 "can_auto_resolve": metadata.get("can_auto_resolve", False),
-                "category": metadata.get("category", "")[:10]
+                "category": metadata.get("category", "General")
             }
             
             # Format document content with remaining metadata
@@ -97,26 +94,26 @@ class VectorStore:
             # Add document using LangChain's wrapper
             await self.vectorstore.aadd_documents(
                 documents=[document],
-                ids=[ticket_id]
+                ids=[document_id]
             )
             
-            logger.info(f"Successfully stored ticket {ticket_id}")
+            print(f"Successfully stored ticket {document_id}")
             
         except Exception as e:
-            logger.error(f"Error storing ticket {ticket_id}: {str(e)}")
+            print(f"Error storing ticket {document_id}: {str(e)}")
             raise
     
-    async def find_similar_tickets(
+    async def find_similar_documents(
         self,
         query_text: str,
         n_results: int = 5,
         score_threshold: float = 0.7
     ) -> List[Dict[str, Any]]:
-        """Find similar tickets using semantic search."""
+        """Find similar documents using semantic search."""
         try:
             if isinstance(query_text, dict):
                 query_text = f"{query_text.get('title', '')} {query_text.get('description', '')}"
-            elif not isinstance(query_text, str):
+            else:
                 query_text = str(query_text)
             
             docs_and_scores = await self.vectorstore.asimilarity_search_with_relevance_scores(
@@ -147,14 +144,14 @@ class VectorStore:
             return similar_tickets
             
         except Exception as e:
-            logger.error(f"Error searching similar tickets: {str(e)}")
+            print(f"Error searching similar tickets: {str(e)}")
             raise
     
-    async def get_ticket(self, ticket_id: str) -> Optional[Dict[str, Any]]:
+    async def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a specific ticket by ID."""
         try:
             result = self.collection.get(
-                ids=[ticket_id],
+                ids=[document_id],
                 include=["documents", "metadatas"]
             )
             
@@ -170,25 +167,25 @@ class VectorStore:
             combined_metadata = {**result['metadatas'][0], **doc_metadata}
             
             return {
-                "ticket_id": ticket_id,
+                "document_id": document_id,
                 "content": actual_content,
                 "metadata": combined_metadata
             }
             
         except Exception as e:
-            logger.error(f"Error retrieving ticket {ticket_id}: {str(e)}")
+            print(f"Error retrieving document {document_id}: {str(e)}")
             raise
     
-    async def update_ticket_metadata(
+    async def update_document_metadata(
         self,
-        ticket_id: str,
+        document_id: str,
         metadata_updates: Dict[str, Any]
     ) -> None:
         """Update metadata for a specific ticket."""
         try:
-            ticket = await self.get_ticket(ticket_id)
-            if not ticket:
-                raise ValueError(f"Ticket {ticket_id} not found")
+            document = await self.get_document(document_id)
+            if not document:
+                raise ValueError(f"Document {document_id} not found")
             
             # Split updates between Chroma metadata and document content
             chroma_metadata_updates = {
@@ -203,30 +200,30 @@ class VectorStore:
             
             if chroma_metadata_updates:
                 # Update Chroma metadata
-                new_metadata = {**ticket["metadata"], **chroma_metadata_updates}
+                new_metadata = {**document["metadata"], **chroma_metadata_updates}
                 if "category" in new_metadata:
                     new_metadata["category"] = new_metadata["category"][:10]
                 self.collection.update(
-                    ids=[ticket_id],
+                    ids=[document_id],
                     metadatas=[new_metadata]
                 )
             
             if doc_metadata_updates:
                 # Update document content metadata
-                content_parts = ticket["content"].split("\n\n", 1)
+                content_parts = document["content"].split("\n\n", 1)
                 doc_metadata = json.loads(content_parts[0]) if len(content_parts) > 1 else {}
-                actual_content = content_parts[1] if len(content_parts) > 1 else ticket["content"]
+                actual_content = content_parts[1] if len(content_parts) > 1 else document["content"]
                 
                 new_doc_metadata = {**doc_metadata, **doc_metadata_updates}
                 new_content = f"{json.dumps(new_doc_metadata)}\n\n{actual_content}"
                 
                 self.collection.update(
-                    ids=[ticket_id],
+                    ids=[document_id],
                     documents=[new_content]
                 )
             
-            logger.info(f"Successfully updated metadata for ticket {ticket_id}")
+            print(f"Successfully updated metadata for document {document_id}")
             
         except Exception as e:
-            logger.error(f"Error updating ticket {ticket_id} metadata: {str(e)}")
+            print(f"Error updating document {document_id} metadata: {str(e)}")
             raise 
