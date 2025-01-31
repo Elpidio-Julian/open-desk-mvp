@@ -355,24 +355,38 @@ Return ONLY ONE team name from the available teams list above, with no additiona
             }
 
 # Create tool instances
-def get_ticket_tools():
-    """Get all ticket-related tools."""
-    vector_store = VectorStore()
+def get_ticket_tools(vector_store: Optional[VectorStore] = None) -> List[Tool]:
+    """Get the list of tools for ticket processing."""
+    # Initialize tools
+    ticket_retriever = TicketRetrieverTool()
+    vector_search = VectorSearchTool()
     
-    return [
-        StructuredTool.from_function(
-            func=TicketRetrieverTool().get_ticket,
+    # Use provided vector_store or create new one
+    if vector_store is None:
+        vector_store = VectorStore()
+    
+    classification_tool = ClassificationTool(vector_store)
+    
+    # Create tools list
+    tools = [
+        Tool(
             name="ticket_retriever",
-            description="Retrieve ticket data from the database using ticket ID"
+            description="Retrieve ticket data from Supabase",
+            func=ticket_retriever.get_ticket,
+            coroutine=ticket_retriever.get_ticket
         ),
-        StructuredTool.from_function(
-            func=VectorSearchTool().find_similar,
+        Tool(
             name="vector_search",
-            description="Search for similar tickets using vector similarity"
+            description="Find similar tickets using vector search",
+            func=vector_search.find_similar,
+            coroutine=vector_search.find_similar
         ),
-        StructuredTool.from_function(
-            func=ClassificationTool(vector_store).classify_ticket,
-            name="ticket_classifier",
-            description="Classify if a ticket can be auto-resolved"
+        Tool(
+            name="classification",
+            description="Classify if a ticket can be auto-resolved",
+            func=classification_tool.classify_ticket,
+            coroutine=classification_tool.classify_ticket
         )
-    ] 
+    ]
+    
+    return tools 

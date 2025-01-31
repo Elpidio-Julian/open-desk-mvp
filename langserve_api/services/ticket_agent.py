@@ -7,6 +7,7 @@ from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage
 from datetime import datetime
 from supabase_client import SupabaseClient
+from services.vector_store import VectorStore
 
 class AgentState(TypedDict):
     """State for the ticket processing agent."""
@@ -23,7 +24,8 @@ class TicketAgent:
     """Agent for processing and classifying support tickets using a graph-based approach."""
 
     def __init__(self):
-        self.tools = get_ticket_tools()
+        self.vector_store = VectorStore()
+        self.tools = get_ticket_tools(vector_store=self.vector_store)  # Pass vector_store to tools
         self.llm = ChatOpenAI(temperature=0)
         self.supabase = SupabaseClient()
         
@@ -41,12 +43,14 @@ class TicketAgent:
         workflow.add_node("find_similar", self._find_similar_tickets)
         workflow.add_node("classify", self._classify_ticket)
         workflow.add_node("update_metadata", self._update_metadata)
+        workflow.add_node("store_in_vectordb", self._store_in_vectordb)
         
         # Define the edges
         workflow.add_edge("retrieve_ticket", "find_similar")
         workflow.add_edge("find_similar", "classify")
         workflow.add_edge("classify", "update_metadata")
-        workflow.add_edge("update_metadata", END)
+        workflow.add_edge("update_metadata", "store_in_vectordb")
+        workflow.add_edge("store_in_vectordb", END)
         
         # Set the entry point
         workflow.set_entry_point("retrieve_ticket")
@@ -132,6 +136,40 @@ class TicketAgent:
             error_msg = f"Error updating metadata: {str(e)}"
             print(f"\nException details: {type(e).__name__}")
             print(f"Exception args: {e.args}")
+            print(error_msg)
+            state["messages"].append(error_msg)
+            return state
+
+    async def _store_in_vectordb(self, state: AgentState) -> AgentState:
+        """Store the ticket in the vector database."""
+        try:
+            print("\nStoring ticket in vector database")
+            
+            # Prepare content from ticket data
+            content = f"Title: {state['ticket_data'].get('title', '')}\n"
+            content += f"Description: {state['ticket_data'].get('description', '')}"
+            
+            # Prepare metadata
+            metadata = {
+                "ticket_id": state["ticket_id"],
+                "creator_id": state["ticket_data"].get("creator_id"),
+                "status": state["ticket_data"].get("status"),
+                "priority": state["ticket_data"].get("priority"),
+                "stored_at": datetime.utcnow().isoformat()
+            }
+            
+            # Store in vector database
+            await self.vector_store.store_document(
+                document_id=state["ticket_id"],
+                content=content,
+                metadata=metadata
+            )
+            
+            state["messages"].append("Stored ticket in vector database")
+            return state
+            
+        except Exception as e:
+            error_msg = f"Error storing in vector database: {str(e)}"
             print(error_msg)
             state["messages"].append(error_msg)
             return state
